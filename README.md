@@ -45,7 +45,7 @@ jupyter notebook netsci/tutorials/src/
 
 | # | Topic | Slides | Tutorial |
 |---|---|---|---|
-| 1 | Introduction to Visual Perception | [dv01-intro-visual-perception.pdf](dataviz/slides/dv01-intro-visual-perception.pdf) | [01-matplotlib/](dataviz/tutorials/01-matplotlib/) |
+| 1 | Introduction to Visual Perception | [dv01-intro-visual-perception.pdf](dataviz/slides/dv01-intro-visual-perception.pdf) | |
 
 ---
 
