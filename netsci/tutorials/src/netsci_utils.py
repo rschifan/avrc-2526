@@ -45,9 +45,10 @@ def set_seeds(seed: int = RANDOM_SEED) -> None:
 # ---------------------------------------------------------------------------
 
 def setup_matplotlib() -> None:
-    """Apply course-wide rcParams: figure size, font, grid, tight layout."""
+    """Apply course-wide rcParams: figure size, font, DPI, grid, tight layout."""
     plt.rcParams.update({
         'figure.figsize':     FIGURE_SIZE,
+        'figure.dpi':         100,
         'font.size':          FONT_SIZE,
         'axes.grid':          True,
         'grid.alpha':         0.3,
