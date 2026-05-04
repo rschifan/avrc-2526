@@ -33,6 +33,7 @@ Course materials for **Network Science** at the University of Turin (UNITO).
 | 14 | Community Benchmarks | [ns14-communities-benchmarks.pdf](netsci/slides/ns14-communities-benchmarks.pdf) | [14-label-propagation-and-evaluation.ipynb](netsci/tutorials/src/14-label-propagation-and-evaluation.ipynb) |
 | 16 | Games on Networks and Strategic Interaction | [ns16-games-on-networks.pdf](netsci/slides/ns16-games-on-networks.pdf) | |
 | 17 | Traffic Networks and Selfish Routing | [ns17-traffic-networks.pdf](netsci/slides/ns17-traffic-networks.pdf) | |
+| 18 | Cascading Behaviors in Networks | [ns18-cascades.pdf](netsci/slides/ns18-cascades.pdf) | |
 
 ---
 
