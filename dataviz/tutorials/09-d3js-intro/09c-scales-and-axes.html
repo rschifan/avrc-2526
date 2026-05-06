@@ -381,22 +381,32 @@ svg.append("path")
         render1D();
 
         // ------------------- .nice() comparison -------------------
+        // Force the axis to show the actual domain endpoints (not the auto-picked
+        // round ticks) so the difference between [123, 49217] and [0, 50000]
+        // is visible.
         const niceData = [123, 487, 1742, 9800, 24371, 49217];
+        const niceFmt  = d => d.toLocaleString();
         {
             const c = makeCanvas("#demo-nice-raw", 90);
-            caption(c.plot, "without .nice()  — domain follows the raw data extent", "#D55E00");
+            caption(c.plot, "without .nice()  — domain runs from the raw min/max of the data", "#D55E00");
             const x = d3.scaleLinear().domain(d3.extent(niceData)).range([0, c.innerW]);
+            const [d0, d1] = x.domain();
             c.plot.append("g")
                 .attr("transform", `translate(0, ${c.innerH})`)
-                .call(d3.axisBottom(x).ticks(6));
+                .call(d3.axisBottom(x)
+                    .tickValues([d0, 10000, 20000, 30000, 40000, d1])
+                    .tickFormat(niceFmt));
         }
         {
             const c = makeCanvas("#demo-nice", 90);
-            caption(c.plot, "with .nice()  — domain rounded to friendly numbers", "#009E73");
+            caption(c.plot, "with .nice()  — domain rounded outward to friendlier endpoints", "#009E73");
             const x = d3.scaleLinear().domain(d3.extent(niceData)).nice().range([0, c.innerW]);
+            const [d0, d1] = x.domain();
             c.plot.append("g")
                 .attr("transform", `translate(0, ${c.innerH})`)
-                .call(d3.axisBottom(x).ticks(6));
+                .call(d3.axisBottom(x)
+                    .tickValues([d0, 10000, 20000, 30000, 40000, d1])
+                    .tickFormat(niceFmt));
         }
 
         // ============================================================
