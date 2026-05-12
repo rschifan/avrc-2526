@@ -36,6 +36,7 @@ Course materials for **Network Science** at the University of Turin (UNITO).
 | 18 | Cascading Behaviors in Networks | [ns18-cascades.pdf](netsci/slides/ns18-cascades.pdf) | |
 | 19–20 | Traditional Machine Learning on Graphs | [ns19-20-ml-graph.pdf](netsci/slides/ns19-20-ml-graph.pdf) | |
 | 21 | Representation Learning on Graphs | [ns21-embeddings.pdf](netsci/slides/ns21-embeddings.pdf) | [21-from-features-to-embeddings.ipynb](netsci/tutorials/src/21-from-features-to-embeddings.ipynb) |
+| 22 | Computational Epidemiology — Compartmental Models | [ns22-epidemics.pdf](netsci/slides/ns22-epidemics.pdf) | [22-epidemic-models.ipynb](netsci/tutorials/src/22-epidemic-models.ipynb) |
 
 ---
 
