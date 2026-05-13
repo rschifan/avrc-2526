@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11c §2 — hover to highlight neighbours</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11c §2 — Hover to highlight neighbours</h1>
+    <p class="lead">The information you usually want from a network view is "what is connected to
+        <em>this</em>?". Hover a node; everything that is not a neighbour fades; labels reveal
+        only on the focal node's neighbourhood.
+        <a href="../../11c-interactivity.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>We precompute a neighbour set per node once at load time and look it up in O(1)
+            during hover.</p>
+        <ul>
+            <li><strong>Precomputed neighbour map</strong>:
+                <code>new Map(nodes.map(d =&gt; [d.id, new Set([d.id])]))</code> seeds each entry
+                with the node itself; a single pass over <code>links</code> adds each endpoint
+                to the other's set. Each entry includes the node itself so the focal node is
+                just another member of the focus set during hover.</li>
+            <li><strong>The <code>l.source.id ?? l.source</code> idiom</strong>: before
+                <code>forceLink</code> initialises, links carry raw string ids; after, D3 has
+                rewritten them with the actual node object. Reading <code>.id</code> with a
+                fallback to the raw string works in both states.</li>
+            <li><strong>Tick handler namespacing</strong>:
+                <code>sim.on("tick.label", …)</code> attaches a <em>second</em> listener to the
+                same <code>tick</code> event, keyed by the <code>.label</code> suffix. Without
+                the suffix, a second <code>sim.on("tick", …)</code> would replace the first.
+                Same pattern works on mouse events (<code>node.on("mouseenter.label", …)</code>).</li>
+            <li><strong>White stroke under text</strong>:
+                <code>paint-order: stroke; stroke: white; stroke-width: 3</code> gives each label
+                a halo so it stays readable when it crosses dark edges or other nodes.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            nodes.forEach(d => d.__r = 4);
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", 4).attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke")
+                .style("cursor", "pointer");
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-90))
+                .force("collide", d3.forceCollide().radius(6))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+
+            // precompute neighbour set per node (O(1) lookup at hover)
+            const neighbors = new Map(nodes.map(d => [d.id, new Set([d.id])]));
+            links.forEach(l => {
+                const a = l.source.id ?? l.source;
+                const b = l.target.id ?? l.target;
+                neighbors.get(a).add(b);
+                neighbors.get(b).add(a);
+            });
+
+            const label = wrap.append("g")
+                .selectAll("text").data(nodes).join("text")
+                .attr("text-anchor", "middle").attr("dy", -8)
+                .style("font-size", "11px")
+                .style("pointer-events", "none")
+                .style("paint-order", "stroke")
+                .style("stroke", "white").style("stroke-width", 3)
+                .style("fill", "#222")
+                .style("opacity", 0)
+                .text(d => d.id.replace(/-/g, " "));
+            sim.on("tick.label", () => {
+                label.attr("x", d => d.x).attr("y", d => d.y);
+            });
+            // drag (so the user can also rearrange — quality-of-life)
+            node.call(d3.drag()
+                .container(() => c.plot.node())
+                .on("start", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+                .on("end", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0);
+                    d.fx = null; d.fy = null;
+                }));
+
+            node.on("mouseenter", (e, d) => {
+                const focus = neighbors.get(d.id);
+                node.attr("opacity", n => focus.has(n.id) ? 1 : 0.1);
+                link.attr("opacity", l =>
+                    focus.has(l.source.id) && focus.has(l.target.id) ? 0.9 : 0.05);
+                label.style("opacity", n => focus.has(n.id) ? 1 : 0);
+            });
+            node.on("mouseleave", () => {
+                node.attr("opacity", 1);
+                link.attr("opacity", 0.5);
+                label.style("opacity", 0);
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-drag.html">&larr; Prev: §1 drag</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="03-click-pin.html">Next: §3 click to pin / unpin &rarr;</a>
+    </nav>
+</body>
+
+</html>

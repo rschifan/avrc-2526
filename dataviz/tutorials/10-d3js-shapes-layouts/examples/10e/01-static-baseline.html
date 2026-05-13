@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>10e §2 — static scatterplot baseline</title>
+    <style>
+        body { max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+            line-height: 1.55; color: #222; font-size: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        h1 { font-size: 1.4em; margin-bottom: 0.3em; }
+        .lead { color: #555; margin-top: 0; }
+        .lead a { color: #0072B2; }
+        svg { width: 100%; height: auto; max-width: 100%; display: block;
+            border: 1px solid #ddd; background: #fafafa; }
+        .axis text { font-size: 13px; fill: #555; }
+        .axis path, .axis line { stroke: #bbb; }
+        .note { background: #f3f6fb; border-left: 4px solid #0072B2;
+            padding: 0.7em 1em; margin: 1em 0; font-size: 14.5px; }
+        .note h3 { margin: 0 0 0.4em 0; font-size: 1.02em; }
+        .note ul { margin: 0.3em 0 0.1em 1.2em; padding: 0; }
+        .note li { margin-bottom: 0.25em; }
+        code { background: #eef2f7; padding: 0 0.25em; border-radius: 2px; }
+        .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
+        a { color: #0072B2; }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>10e §2 — Static scatterplot (baseline)</h1>
+    <p class="lead">The starting point. Gapminder 2007 — GDP per capita (log) against life
+        expectancy, circle area encodes population, colour encodes continent. Wheel and drag do
+        nothing yet. The next three examples progressively add zoom behaviour to <em>this</em>
+        chart.
+        <a href="../../10e-zoom-and-navigation.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>A complete, conventional scatterplot — the same shape we will keep using as we add
+            zoom behaviour. The point is to fix the visual reference: every change in §3–§5 is
+            a delta against <em>this</em> chart.</p>
+        <ul>
+            <li><strong>Four visual channels</strong> from one row of Gapminder: <em>x</em> =
+                GDP per capita on a log scale, <em>y</em> = life expectancy (linear),
+                circle <em>area</em> = population (via <code>scaleSqrt</code>), <em>colour</em> =
+                continent (categorical palette).</li>
+            <li><strong>Margin convention</strong> via <code>makeCanvas</code>: the inner
+                <code>plot</code> group is translated by <code>(margin.left, margin.top)</code>
+                so axes have room to render outside the data area.</li>
+            <li><strong>Native SVG tooltips</strong>: each circle has a <code>&lt;title&gt;</code>
+                child, which the browser renders on hover. No JS needed — useful as a baseline
+                before custom tooltips (covered in 10c §3).</li>
+            <li><strong>No zoom yet</strong>: wheel and drag intentionally do nothing. The next
+                three examples each add one ingredient on top.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+    <script>
+        // ─────────────────────────────────────────────────────────────────────
+        const PALETTE = {
+            Africa: "#009E73", Americas: "#D55E00", Asia: "#0072B2",
+            Europe: "#CC79A7", Oceania: "#E69F00"
+        };
+        const c = makeCanvas("#demo", 420, {
+            margin: { top: 20, right: 30, bottom: 50, left: 60 }
+        });
+
+        d3.csv("../../datasets/gapminder.csv", d => ({
+            country: d.country, continent: d.continent, year: +d.year,
+            gdpPercap: +d.gdpPercap, lifeExp: +d.lifeExp, pop: +d.pop
+        })).then(raw => {
+            const data = raw.filter(d => d.year === 2007);
+            const x = d3.scaleLog().domain([200, 100000]).range([0, c.innerW]);
+            const y = d3.scaleLinear().domain([35, 85]).range([c.innerH, 0]);
+            const r = d3.scaleSqrt().domain([0, d3.max(data, d => d.pop)]).range([2, 18]);
+
+            c.plot.append("g").attr("class", "axis")
+                .attr("transform", `translate(0, ${c.innerH})`)
+                .call(d3.axisBottom(x).ticks(6, "~s"));
+            c.plot.append("g").attr("class", "axis")
+                .call(d3.axisLeft(y));
+            c.plot.append("text")
+                .attr("x", c.innerW / 2).attr("y", c.innerH + 38)
+                .attr("text-anchor", "middle")
+                .style("font-size", "13px").style("fill", "#555")
+                .text("GDP per capita (log)");
+            c.plot.append("text").attr("transform", "rotate(-90)")
+                .attr("x", -c.innerH / 2).attr("y", -44)
+                .attr("text-anchor", "middle")
+                .style("font-size", "13px").style("fill", "#555")
+                .text("life expectancy");
+
+            c.plot.selectAll("circle").data(data).join("circle")
+                .attr("cx", d => x(d.gdpPercap))
+                .attr("cy", d => y(d.lifeExp))
+                .attr("r",  d => r(d.pop))
+                .attr("fill", d => PALETTE[d.continent])
+                .attr("opacity", 0.75)
+                .attr("stroke", "white").attr("stroke-width", 1)
+              .append("title").text(d => `${d.country}\n${d.lifeExp.toFixed(1)} yr`);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <span></span>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="02-naive-group-zoom.html">Next: §3 naïve group transform &rarr;</a>
+    </nav>
+</body>
+
+</html>

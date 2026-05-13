@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11f — Stage 7: cluster forces (community-aware layout)</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11f — Stage 7: Cluster forces (community-aware layout)</h1>
+    <p class="lead">A per-community <code>forceX</code> / <code>forceY</code> pulls each node
+        toward its community's centroid. Communities separate <em>during</em> layout instead of
+        being coloured after the fact. The state-of-the-art tuning that pure
+        <code>forceCenter</code> gets wrong.
+        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+    </p>
+
+    <div class="note">
+        <h3>What this stage adds (vs the previous stage)</h3>
+        <p>One pair of forces — <code>forceX</code> and <code>forceY</code> with a
+            <em>per-node target</em> derived from its community. Strength 0.08 is gentle enough
+            that link springs and charge still shape the within-community geometry, but strong
+            enough that communities visibly separate. Drop the strength to 0 and you're back to
+            the stage 3 layout; crank to 0.3 and communities become rigid blobs.
+        </p>
+        <ul>
+            <li><strong>Target placement</strong>: each community gets a target point on a ring
+                inside the canvas. <code>angle = i / nCommunities · 2π</code>,
+                <code>radius = 0.30 · min(W, H)</code>. The ring keeps targets equidistant from
+                the centre — no community starts privileged.
+            </li>
+            <li><strong>Per-datum strength</strong>:
+                <code>d3.forceX(d =&gt; tgt.get(d.community).x)</code>. The function form lets
+                each node aim at a <em>different</em> target. This is the modern idiom — a single
+                <code>forceX</code> with a varying target beats N separate forces.
+            </li>
+            <li><strong>Why this is better than hulls</strong>: the hull view (11d §3) draws a
+                boundary around whatever the layout happens to produce. Cluster forces
+                <em>produce</em> the boundary by separating communities at simulation time. Less
+                visual machinery, more honest signal.
+            </li>
+            <li><strong>Why <code>forceCenter</code> is missing</strong>:
+                <code>forceCenter</code> pins the overall centre of mass — useful for one blob,
+                bad when you want multiple blobs to pull apart. The <code>forceX</code> +
+                <code>forceY</code> pair with the canvas centre as target replaces it cleanly,
+                and per-node <code>x</code> / <code>y</code> targets generalise from there.
+            </li>
+            <li><strong>Tuning hint</strong>: if communities overlap visibly, raise the cluster
+                strength or weaken the link force (smaller distance / stronger charge). If they
+                fly apart and miss the canvas, lower the cluster strength or pull the targets
+                inward (smaller <code>radius</code>).</li>
+            <li><strong>Cross-reference</strong>: similar trick scales to dozens of communities
+                via the <a href="https://github.com/john-guerra/forceInABox" target="_blank">forceInABox</a>
+                plugin (treemap-based packing), or
+                <a href="https://github.com/ericsoco/d3-force-cluster" target="_blank">d3-force-cluster</a>
+                (custom Verlet integrator). For under ~10 groups the simple <code>forceX</code> /
+                <code>forceY</code> pair is enough and ships in core <code>d3-force</code>.
+            </li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            nodes.forEach(d => d.__r = r(d.bc));
+
+            const cks = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+            const ang = i => (i / cks.length) * 2 * Math.PI - Math.PI / 2;
+            const rad = 0.30 * Math.min(c.innerW, c.innerH);
+            const tgt = new Map(cks.map((cm, i) => [cm, {
+                x: c.innerW / 2 + rad * Math.cos(ang(i)),
+                y: c.innerH / 2 + rad * Math.sin(ang(i))
+            }]));
+
+            const link = c.plot.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.4)
+                .selectAll("line").data(links).join("line");
+            const node = c.plot.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => r(d.bc))
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 1);
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(30))
+                .force("charge", d3.forceManyBody().strength(-70))
+                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("xCluster", d3.forceX(d => tgt.get(d.community).x).strength(0.08))
+                .force("yCluster", d3.forceY(d => tgt.get(d.community).y).strength(0.08))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+            attachWarmup(c.root, sim);
+
+            // small target markers so students see the anchors
+            c.plot.append("g").selectAll("circle.tgt")
+                .data([...tgt.values()]).join("circle")
+                .attr("class", "tgt")
+                .attr("cx", d => d.x).attr("cy", d => d.y)
+                .attr("r", 3)
+                .attr("fill", "none")
+                .attr("stroke", "#999")
+                .attr("stroke-dasharray", "2,2");
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="06-perf-and-scale.html">&larr; Prev: perf and scale</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="../11h/01-worker-simulation.html">Next: 11h — Web Worker simulation &rarr;</a>
+    </nav>
+</body>
+
+</html>

@@ -14,6 +14,12 @@
             border: 1px solid #ddd; background: #fafafa; }
         .axis text { font-size: 13px; fill: #555; }
         .axis path, .axis line { stroke: #bbb; }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -103,5 +109,12 @@
             });
         });
     </script>
+
+    <nav class="example-nav">
+        <a href="02-hover-tooltip.html">&larr; Prev: §3 hover tooltip</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="04-year-slider.html">Next: §5 year slider &rarr;</a>
+    </nav>
 </body>
 </html>

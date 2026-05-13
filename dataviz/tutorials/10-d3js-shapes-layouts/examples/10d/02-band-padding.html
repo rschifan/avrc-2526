@@ -12,6 +12,12 @@
         svg { width: 100%; height: auto; max-width: 100%; display: block;
             border: 1px solid #ddd; background: #fafafa; }
         a { color: #0072B2; }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -43,5 +49,12 @@
                 .attr("fill", "#0072B2").attr("opacity", 0.7);
         });
     </script>
+
+    <nav class="example-nav">
+        <a href="01-bar-chart.html">&larr; Prev: §2 basic bar chart</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="03-stacked-bar.html">Next: §6 stacked bar chart &rarr;</a>
+    </nav>
 </body>
 </html>

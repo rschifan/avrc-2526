@@ -24,6 +24,12 @@
             font-size: 12px; line-height: 1.4;
             opacity: 0; transition: opacity 0.15s;
         }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -252,5 +258,12 @@
             render();
         });
     </script>
+
+    <nav class="example-nav">
+        <span></span>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="02-hover-tooltip.html">Next: §3 hover tooltip &rarr;</a>
+    </nav>
 </body>
 </html>

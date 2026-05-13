@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11c — Interactivity: drag, hover, click</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+</head>
+
+<body>
+    <h1>11c — Interactivity: drag, hover, click</h1>
+    <p class="lead">A static force layout already shows the shape of a network. Three interactions turn it
+        into something you can <em>read</em>: drag (rearrange by hand), hover (focus on a node and its
+        neighbours), click (pin or filter). All three reuse the <code>fx</code>/<code>fy</code> mechanism
+        from <code>11b</code> and the data join from L9.</p>
+
+    <h2>1. Drag with <code>d3.drag</code></h2>
+    <p>Dragging a node is "pin while the pointer is down": set <code>fx</code>/<code>fy</code> on the dragged
+        datum, follow the pointer, then release. D3 ships a behaviour for the pointer plumbing:</p>
+    <pre><code>function drag(sim) {
+    function started(event, d) {
+        if (!event.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x;  d.fy = d.y;
+    }
+    function dragged(event, d) {
+        d.fx = event.x;  d.fy = event.y;
+    }
+    function ended(event, d) {
+        if (!event.active) sim.alphaTarget(0);
+        d.fx = null;  d.fy = null;
+    }
+    return d3.drag()
+        .container(() =&gt; c.plot.node())   // pan/zoom-aware coords
+        .on("start", started).on("drag", dragged).on("end", ended);
+}
+
+node.call(drag(sim));</code></pre>
+    <p>Three things to notice:</p>
+    <ul>
+        <li><code>alphaTarget(0.3).restart()</code> — keeps the simulation simmering while dragging, so the
+            rest of the graph reacts instead of freezing.</li>
+        <li>On <code>start</code> we pin to the <em>current</em> position so the node doesn't snap to the
+            pointer's coordinate system.</li>
+        <li>On <code>end</code> we set <code>fx</code>/<code>fy</code> back to <code>null</code> — the node
+            becomes free again and the simulation settles.</li>
+    </ul>
+    <p>Drag any node below; release it and it relaxes back into the layout:</p>
+    <div class="container" id="demo-drag"></div>
+
+    <h2>2. Hover to highlight neighbours</h2>
+    <p>The information you usually want from a network view is "what is connected to <em>this</em>?". Hover
+        a node, fade everything that is not a neighbour. The trick is to precompute a neighbour set per
+        node so the hover handler is O(1):</p>
+    <pre><code>const neighbors = new Map(nodes.map(d =&gt; [d.id, new Set([d.id])]));
+links.forEach(l =&gt; {
+    const a = l.source.id ?? l.source;
+    const b = l.target.id ?? l.target;
+    neighbors.get(a).add(b);
+    neighbors.get(b).add(a);
+});
+
+node.on("mouseenter", (event, d) =&gt; {
+    const focus = neighbors.get(d.id);
+    node.attr("opacity", n =&gt; focus.has(n.id) ? 1 : 0.1);
+    link.attr("opacity", l =&gt; focus.has(l.source.id) &amp;&amp; focus.has(l.target.id) ? 0.9 : 0.05);
+});
+node.on("mouseleave", () =&gt; {
+    node.attr("opacity", 1);
+    link.attr("opacity", 0.5);
+});</code></pre>
+    <p>The <code>l.source.id ?? l.source</code> idiom handles a small wrinkle: <code>forceLink</code>
+        rewrites every link's <code>source</code>/<code>target</code> string into the actual node object, but
+        only after the simulation has been initialised. Reading <code>.id</code> with a fallback to the raw
+        string lets the same code run before and after that swap.</p>
+
+    <p><strong>Conditional labels.</strong> Labelling every node in a 187-node network is unreadable.
+        The same hover handler can do double duty: hide all labels by default, then reveal only the
+        focal node's neighbourhood on hover:</p>
+    <pre><code>const label = wrap.append("g").selectAll("text")
+    .data(nodes).join("text")
+    .attr("text-anchor", "middle").attr("dy", -8)
+    .style("font-size", "11px").style("pointer-events", "none")
+    .style("opacity", 0)                                       // hidden by default
+    .text(d =&gt; d.id.replace(/-/g, " "));
+
+sim.on("tick.label", () =&gt; {                                  // keep labels glued
+    label.attr("x", d =&gt; d.x).attr("y", d =&gt; d.y);          // to their nodes
+});
+
+node.on("mouseenter", (event, d) =&gt; {                         // extend the same
+    const focus = neighbors.get(d.id);                         // hover handler
+    node.attr("opacity", n =&gt; focus.has(n.id) ? 1 : 0.1);
+    link.attr("opacity", l =&gt;
+        focus.has(l.source.id) &amp;&amp; focus.has(l.target.id) ? 0.9 : 0.05);
+    label.style("opacity", n =&gt; focus.has(n.id) ? 1 : 0);   // reveal neighbours
+});
+node.on("mouseleave", () =&gt; {
+    node.attr("opacity", 1);
+    link.attr("opacity", 0.5);
+    label.style("opacity", 0);
+});</code></pre>
+    <p>The <code>tick.label</code> namespace adds a <em>second</em> tick listener without replacing
+        the one that positions nodes and links — without the suffix, a second
+        <code>sim.on("tick", …)</code> call would overwrite the first.</p>
+    <p>Hover the densely connected core below: rest of the network fades AND the focal node's
+        neighbours show their names:</p>
+    <div class="container" id="demo-hover"></div>
+
+    <h2>3. Click to pin / unpin</h2>
+    <p>Click a node and it stays where it is — even when the simulation reheats. Click it again and it
+        releases. Same <code>fx</code>/<code>fy</code> mechanism, no drag involved:</p>
+    <pre><code>node.on("click", (event, d) =&gt; {
+    if (d.fx == null) {           // currently free → pin at current position
+        d.fx = d.x;
+        d.fy = d.y;
+        d3.select(event.currentTarget).attr("stroke", "#D55E00").attr("stroke-width", 3);
+    } else {                       // already pinned → release
+        d.fx = null;
+        d.fy = null;
+        d3.select(event.currentTarget).attr("stroke", "white").attr("stroke-width", 1);
+    }
+});</code></pre>
+    <p>Combined with drag and hover, this is the full interaction vocabulary you'll see in nearly every
+        D3 network demo. The capstone in <code>11e</code> uses all three:</p>
+    <div class="container" id="demo-click"></div>
+
+    <h2>4. Click-to-isolate with an animated transition</h2>
+    <p>For a focused view, replace the click-to-pin with a richer interaction: clicking a node
+        slides it to the left and stacks its neighbours in a vertical column on the right;
+        clicking the empty background animates everything back and the force layout resumes.
+        Three pieces fit together:</p>
+    <ul>
+        <li><strong>A three-state machine</strong>:
+            <code>idle</code> → <code>transitioning</code> → <code>isolated</code> →
+            <code>transitioning</code> → <code>idle</code>. Clicking another node mid-isolation
+            snaps back to the snapshot and isolates the new node immediately.</li>
+        <li><strong>Snapshot positions before isolating</strong>, and on dismiss animate
+            <em>back to that snapshot</em> — this keeps the reset calm and reversible.</li>
+        <li><strong>Resume the simulation gently after the dismiss</strong>: sync each node's
+            <code>x, y</code> to the snapshot and call <code>sim.alpha(0.15).restart()</code>
+            so the layout is alive again (drag, hover and the force springs all work) without
+            a violent re-equilibration.</li>
+    </ul>
+    <pre><code>let phase      = "idle";   // 'idle' | 'transitioning' | 'isolated'
+let snapshot   = null;
+let phaseTimer = null;     // cancellable end-of-transition timer
+const DURATION = 800;
+
+function isolate(focal) {
+    clearTimeout(phaseTimer);
+    phase = "transitioning";
+    sim.stop();
+    if (!snapshot)
+        snapshot = new Map(nodes.map(n =&gt; [n.id, { x: n.x, y: n.y }]));
+
+    const others = [...neighbors.get(focal.id)].filter(id =&gt; id !== focal.id);
+
+    // Centre the column around innerH/2 regardless of count.
+    const PITCH = 24;
+    const span  = Math.min(innerH - 60, (others.length - 1) * PITCH);
+    const top   = innerH / 2 - span / 2;
+    const yOf   = others.length &lt;= 1
+        ? () =&gt; innerH / 2
+        : i  =&gt; top + (span * i) / (others.length - 1);
+
+    const dest = new Map();
+    dest.set(focal.id, { x: 80, y: innerH / 2 });
+    others.forEach((id, i) =&gt; dest.set(id, { x: innerW - 220, y: yOf(i) }));
+
+    const destX = r =&gt; dest.has(idOf(r)) ? dest.get(idOf(r)).x : r.x;
+    const destY = r =&gt; dest.has(idOf(r)) ? dest.get(idOf(r)).y : r.y;
+    const isActive = l =&gt;
+        idOf(l.source) === focal.id || idOf(l.target) === focal.id;
+
+    node.transition().duration(DURATION)
+        .attr("cx", n =&gt; destX(n)).attr("cy", n =&gt; destY(n))
+        .attr("r",   n =&gt; n.id === focal.id ? 9        : 4)
+        .attr("fill", n =&gt; n.id === focal.id ? "#D55E00" : "#0072B2")
+        .attr("opacity", n =&gt;
+            (n.id === focal.id || others.includes(n.id)) ? 1 : 0);
+    link.transition().duration(DURATION)
+        .attr("x1", l =&gt; destX(l.source)).attr("y1", l =&gt; destY(l.source))
+        .attr("x2", l =&gt; destX(l.target)).attr("y2", l =&gt; destY(l.target))
+        .attr("opacity", l =&gt; isActive(l) ? 0.85 : 0);
+
+    // After the move, drop the names into place (focal on top, others to right).
+    phaseTimer = setTimeout(() =&gt; {
+        phase = "isolated";
+        renderIsolationLabels(focal, others, dest);
+    }, DURATION);
+}
+
+function dismiss() {
+    clearTimeout(phaseTimer);
+    phase = "transitioning";
+    clearIsolationLabels();
+
+    node.transition().duration(DURATION)
+        .attr("cx", n =&gt; snapshot.get(n.id).x)
+        .attr("cy", n =&gt; snapshot.get(n.id).y)
+        .attr("r", 4).attr("fill", "#0072B2").attr("opacity", 1);
+    link.transition().duration(DURATION)
+        .attr("x1", l =&gt; snapshot.get(idOf(l.source)).x)
+        .attr("y1", l =&gt; snapshot.get(idOf(l.source)).y)
+        .attr("x2", l =&gt; snapshot.get(idOf(l.target)).x)
+        .attr("y2", l =&gt; snapshot.get(idOf(l.target)).y)
+        .attr("opacity", 0.5);
+
+    phaseTimer = setTimeout(() =&gt; {
+        nodes.forEach(n =&gt; {
+            const s = snapshot.get(n.id);
+            n.x = s.x; n.y = s.y; n.vx = 0; n.vy = 0;
+            n.fx = null; n.fy = null;
+        });
+        sim.alpha(0.15).restart();              // layout is alive again
+        snapshot = null;
+        phase    = "idle";
+    }, DURATION + 20);
+}
+
+// Click on a node always isolates it. If we are mid-isolation, first snap
+// every mark back to the snapshot (no animation) so the next isolate has a
+// clean starting state — this is what prevents the stuck-state.
+node.on("click", (event, d) =&gt; {
+    event.stopPropagation();
+    if (phase !== "idle") snapToSnapshot();
+    isolate(d);
+});
+c.root.on("click", event =&gt; {
+    if (event.target.tagName === "svg" &amp;&amp; phase === "isolated") dismiss();
+});</code></pre>
+    <p>Click any node to isolate it; click anywhere again to animate back to the full
+        layout:</p>
+    <div class="container" id="demo-isolate"></div>
+
+    <div class="note"><strong>Takeaway.</strong> Three small handlers cover the bulk of network
+        interaction: <strong>drag</strong> sets <code>fx</code>/<code>fy</code> while the pointer is down,
+        <strong>hover</strong> fades anything outside a precomputed neighbour set, and <strong>click</strong>
+        either toggles a pin or pulls a node and its neighbours into an animated focus view
+        backed by a position snapshot. Every interaction in L11 sits on this same vocabulary.</div>
+
+    <p class="tutorial-nav"><a href="11b-force-layouts.html">← 11b — Force layouts</a> ·
+        <a href="index.html">L11 index</a> ·
+        <a href="11d-encoding-and-zoom.html">11d — Encoding and zoom →</a></p>
+
+    <script>
+        const DATA_URL = "./datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const cloneGraph = () => ({
+                nodes: raw.nodes.map(d => ({ ...d })),
+                links: raw.links.map(d => ({ ...d }))
+            });
+
+            // shared drag helper
+            function makeDrag(sim, container) {
+                return d3.drag()
+                    .container(() => container)
+                    .on("start", (e, d) => {
+                        if (!e.active) sim.alphaTarget(0.3).restart();
+                        d.fx = d.x; d.fy = d.y;
+                    })
+                    .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+                    .on("end", (e, d) => {
+                        if (!e.active) sim.alphaTarget(0);
+                        d.fx = null; d.fy = null;
+                    });
+            }
+
+            function buildLayout(selector, height) {
+                const c = makeCanvas(selector, height,
+                    { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const { nodes, links } = cloneGraph();
+                nodes.forEach(d => d.__r = 4);
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g")
+                    .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", 4)
+                    .attr("fill", "#0072B2")
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke")
+                    .style("cursor", "pointer");
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-90))
+                    .force("collide", d3.forceCollide().radius(6))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+                return { c, nodes, links, link, node, sim, wrap };
+            }
+
+            // ============================================================
+            // §1. drag
+            // ============================================================
+            {
+                const L = buildLayout("#demo-drag", 520);
+                L.node.call(makeDrag(L.sim, L.c.plot.node()));
+            }
+
+            // ============================================================
+            // §2. hover with precomputed neighbours + conditional labels
+            // ============================================================
+            {
+                const L = buildLayout("#demo-hover", 520);
+                L.node.call(makeDrag(L.sim, L.c.plot.node()));
+                const neighbors = new Map(L.nodes.map(d => [d.id, new Set([d.id])]));
+                L.links.forEach(l => {
+                    const a = l.source.id ?? l.source;
+                    const b = l.target.id ?? l.target;
+                    neighbors.get(a).add(b);
+                    neighbors.get(b).add(a);
+                });
+
+                const label = L.wrap.append("g")
+                    .selectAll("text").data(L.nodes).join("text")
+                    .attr("text-anchor", "middle").attr("dy", -8)
+                    .style("font-size", "11px")
+                    .style("pointer-events", "none")
+                    .style("paint-order", "stroke")
+                    .style("stroke", "white").style("stroke-width", 3)
+                    .style("fill", "#222")
+                    .style("opacity", 0)
+                    .text(d => d.id.replace(/-/g, " "));
+                L.sim.on("tick.label", () => {
+                    label.attr("x", d => d.x).attr("y", d => d.y);
+                });
+                L.node.on("mouseenter", (e, d) => {
+                    const focus = neighbors.get(d.id);
+                    L.node.attr("opacity", n => focus.has(n.id) ? 1 : 0.1);
+                    L.link.attr("opacity", l =>
+                        focus.has(l.source.id) && focus.has(l.target.id) ? 0.9 : 0.05);
+                    label.style("opacity", n => focus.has(n.id) ? 1 : 0);
+                });
+                L.node.on("mouseleave", () => {
+                    L.node.attr("opacity", 1);
+                    L.link.attr("opacity", 0.5);
+                    label.style("opacity", 0);
+                });
+            }
+
+            // ============================================================
+            // §3. click to pin / unpin
+            // ============================================================
+            {
+                const L = buildLayout("#demo-click", 520);
+                L.node.call(makeDrag(L.sim, L.c.plot.node()));
+                L.node.on("click", (e, d) => {
+                    if (d.fx == null) {
+                        d.fx = d.x; d.fy = d.y;
+                        d3.select(e.currentTarget)
+                            .attr("stroke", "#D55E00").attr("stroke-width", 3);
+                    } else {
+                        d.fx = null; d.fy = null;
+                        d3.select(e.currentTarget)
+                            .attr("stroke", "white").attr("stroke-width", 1);
+                    }
+                });
+            }
+
+            // ============================================================
+            // §4. click-to-isolate with animated transition
+            // ============================================================
+            {
+                const L = buildLayout("#demo-isolate", 520);
+                L.node.call(makeDrag(L.sim, L.c.plot.node()));
+                const neighbors = buildNeighbors(L.nodes, L.links);
+
+                // Two label layers (only visible at specific moments):
+                //   labelG       — focal + right-column names during isolation
+                //   hoverLabel   — name of the hovered node during the idle layout
+                const labelG = L.wrap.append("g")
+                    .attr("class", "isolate-labels")
+                    .style("font-size", "11px")
+                    .style("pointer-events", "none")
+                    .style("paint-order", "stroke")
+                    .style("stroke", "white").style("stroke-width", 3)
+                    .style("fill", "#222");
+                let hoveredNode = null;
+                const hoverLabel = L.wrap.append("text")
+                    .attr("text-anchor", "middle")
+                    .style("font-size", "11px")
+                    .style("pointer-events", "none")
+                    .style("paint-order", "stroke")
+                    .style("stroke", "white").style("stroke-width", 3)
+                    .style("fill", "#222")
+                    .style("opacity", 0);
+                L.sim.on("tick.hover", () => {
+                    if (hoveredNode)
+                        hoverLabel.attr("x", hoveredNode.x)
+                                  .attr("y", hoveredNode.y - 4 - 4);
+                });
+
+                // State machine: idle ↔ isolated, with transitioning between.
+                let phase      = "idle";
+                let snapshot   = null;
+                let phaseTimer = null;
+                const DURATION = 800;
+
+                function isolate(focal) {
+                    clearTimeout(phaseTimer);
+                    phase = "transitioning";
+                    L.sim.stop();
+                    if (!snapshot)
+                        snapshot = new Map(L.nodes.map(n => [n.id, { x: n.x, y: n.y }]));
+
+                    const others = [...neighbors.get(focal.id)]
+                        .filter(id => id !== focal.id);
+
+                    // Centre the column around innerH/2 regardless of count.
+                    const PITCH = 24;
+                    const span  = Math.min(L.c.innerH - 60, (others.length - 1) * PITCH);
+                    const top   = L.c.innerH / 2 - span / 2;
+                    const yOf   = others.length <= 1
+                        ? () => L.c.innerH / 2
+                        : i  => top + (span * i) / (others.length - 1);
+
+                    // Right column pushed inside the canvas so labels have
+                    // room to extend rightward without clipping.
+                    const dest = new Map();
+                    dest.set(focal.id, { x: 80, y: L.c.innerH / 2 });
+                    others.forEach((id, i) =>
+                        dest.set(id, { x: L.c.innerW - 220, y: yOf(i) }));
+
+                    const destX = ref => dest.has(idOf(ref)) ? dest.get(idOf(ref)).x : ref.x;
+                    const destY = ref => dest.has(idOf(ref)) ? dest.get(idOf(ref)).y : ref.y;
+                    const isActive = l =>
+                        idOf(l.source) === focal.id || idOf(l.target) === focal.id;
+
+                    L.node.transition().duration(DURATION)
+                        .attr("cx", n => destX(n))
+                        .attr("cy", n => destY(n))
+                        .attr("r", n => n.id === focal.id ? 9 : 4)
+                        .attr("fill", n => n.id === focal.id ? "#D55E00" : "#0072B2")
+                        .attr("opacity", n =>
+                            (n.id === focal.id || others.includes(n.id)) ? 1 : 0);
+
+                    L.link.transition().duration(DURATION)
+                        .attr("x1", l => destX(l.source))
+                        .attr("y1", l => destY(l.source))
+                        .attr("x2", l => destX(l.target))
+                        .attr("y2", l => destY(l.target))
+                        .attr("opacity", l => isActive(l) ? 0.85 : 0);
+
+                    // At the end of the animation, drop the names into place.
+                    phaseTimer = setTimeout(() => {
+                        phase = "isolated";
+                        const labelData = [
+                            { id: focal.id, kind: "focal" },
+                            ...others.map(id => ({ id, kind: "right" }))
+                        ];
+                        const sel = labelG.selectAll("text").data(labelData, d => d.id);
+                        sel.exit().remove();
+                        sel.enter().append("text")
+                            .attr("opacity", 0)
+                          .merge(sel)
+                            .attr("text-anchor", d => d.kind === "focal" ? "middle" : "start")
+                            .attr("dy",          d => d.kind === "focal" ? null     : "0.32em")
+                            .attr("x", d => d.kind === "focal" ? dest.get(d.id).x
+                                                               : dest.get(d.id).x + 10)
+                            .attr("y", d => d.kind === "focal" ? dest.get(d.id).y - 9 - 4
+                                                               : dest.get(d.id).y)
+                            .text(d => d.id.replace(/-/g, " "))
+                            .transition().duration(200).attr("opacity", 1);
+                    }, DURATION);
+                }
+
+                function clearIsolateLabels() {
+                    labelG.selectAll("text").remove();
+                }
+
+                function dismiss() {
+                    clearTimeout(phaseTimer);
+                    phase = "transitioning";
+                    clearIsolateLabels();
+
+                    L.node.transition().duration(DURATION)
+                        .attr("cx", n => snapshot.get(n.id).x)
+                        .attr("cy", n => snapshot.get(n.id).y)
+                        .attr("r", 4).attr("fill", "#0072B2").attr("opacity", 1);
+
+                    L.link.transition().duration(DURATION)
+                        .attr("x1", l => snapshot.get(idOf(l.source)).x)
+                        .attr("y1", l => snapshot.get(idOf(l.source)).y)
+                        .attr("x2", l => snapshot.get(idOf(l.target)).x)
+                        .attr("y2", l => snapshot.get(idOf(l.target)).y)
+                        .attr("opacity", 0.5);
+
+                    phaseTimer = setTimeout(() => {
+                        L.nodes.forEach(n => {
+                            const s = snapshot.get(n.id);
+                            n.x = s.x; n.y = s.y; n.vx = 0; n.vy = 0;
+                            n.fx = null; n.fy = null;
+                        });
+                        L.sim.alpha(0.15).restart();
+                        snapshot = null;
+                        phase    = "idle";
+                    }, DURATION + 20);
+                }
+
+                // Snap every mark back to the snapshot without an animation,
+                // used when the user clicks a node mid-isolation.
+                function snapToSnapshot() {
+                    if (!snapshot) return;
+                    L.node.interrupt(); L.link.interrupt();
+                    clearIsolateLabels();
+                    L.node.attr("cx", n => snapshot.get(n.id).x)
+                          .attr("cy", n => snapshot.get(n.id).y)
+                          .attr("r", 4).attr("fill", "#0072B2").attr("opacity", 1);
+                    L.link.attr("x1", l => snapshot.get(idOf(l.source)).x)
+                          .attr("y1", l => snapshot.get(idOf(l.source)).y)
+                          .attr("x2", l => snapshot.get(idOf(l.target)).x)
+                          .attr("y2", l => snapshot.get(idOf(l.target)).y)
+                          .attr("opacity", 0.5);
+                    L.nodes.forEach(n => {
+                        const s = snapshot.get(n.id);
+                        n.x = s.x; n.y = s.y; n.vx = 0; n.vy = 0;
+                        n.fx = null; n.fy = null;
+                    });
+                }
+
+                // Hover label only during the idle layout.
+                L.node.on("mouseenter", (e, d) => {
+                    if (phase !== "idle") return;
+                    hoveredNode = d;
+                    hoverLabel.text(d.id.replace(/-/g, " "))
+                        .attr("x", d.x).attr("y", d.y - 4 - 4)
+                        .style("opacity", 1);
+                });
+                L.node.on("mouseleave", () => {
+                    hoveredNode = null;
+                    hoverLabel.style("opacity", 0);
+                });
+
+                L.node.on("click", (e, d) => {
+                    e.stopPropagation();
+                    hoveredNode = null;
+                    hoverLabel.style("opacity", 0);
+                    if (phase !== "idle") snapToSnapshot();
+                    isolate(d);
+                });
+
+                L.c.root.on("click", (e) => {
+                    if (e.target.tagName !== "svg") return;
+                    if (phase === "isolated") dismiss();
+                });
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,101 @@
+/* Shared minimal CSS for L11 standalone examples. */
+body {
+    max-width: 1100px;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    line-height: 1.55;
+    color: #222;
+    font-size: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+h1 { font-size: 1.4em; margin-bottom: 0.3em; }
+.lead { color: #555; margin-top: 0; }
+.lead a { color: #0072B2; }
+a { color: #0072B2; }
+svg { width: 100%; height: auto; max-width: 100%; display: block; }
+button {
+    padding: 0.4em 0.9em;
+    font-size: 0.95em;
+    cursor: pointer;
+}
+code {
+    background: #eef2f7;
+    padding: 0 0.25em;
+    border-radius: 2px;
+    font-size: 0.95em;
+}
+pre {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    padding: 0.7em 1em;
+    overflow-x: auto;
+    font-size: 13.5px;
+    line-height: 1.45;
+    margin: 0.8em 0;
+}
+pre code { background: transparent; padding: 0; }
+.note {
+    background: #f3f6fb;
+    border-left: 4px solid #0072B2;
+    padding: 0.7em 1em;
+    margin: 1em 0;
+    font-size: 14.5px;
+}
+.note h3 { margin: 0 0 0.4em 0; font-size: 1.02em; }
+.note ul { margin: 0.3em 0 0.1em 1.2em; padding: 0; }
+.note li { margin-bottom: 0.25em; }
+.warn {
+    background: #fff4e5;
+    border-left: 4px solid #E69F00;
+    padding: 0.6em 0.9em;
+    margin: 1em 0;
+    font-size: 14px;
+}
+.example-nav {
+    margin-top: 2em;
+    padding-top: 1em;
+    border-top: 1px solid #ddd;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    gap: 1em;
+}
+.example-nav .spacer { flex: 1; }
+.example-nav a { text-decoration: none; }
+.example-nav a:hover { text-decoration: underline; }
+.toolbar {
+    display: flex;
+    gap: 1em;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 0.6em 0;
+    font-size: 14.5px;
+}
+.toolbar input[type="search"] {
+    padding: 0.3em 0.5em;
+    font-size: 14.5px;
+    border: 1px solid #c5c9ce;
+    border-radius: 3px;
+    min-width: 14em;
+}
+.force-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4em 1.6em;
+    margin: 0.8em 0;
+    font-size: 14.5px;
+}
+.force-controls label {
+    display: grid;
+    grid-template-columns: 9em 3em 1fr;
+    align-items: center;
+    gap: 0.4em;
+}
+.force-controls input[type="range"] { width: 100%; }
+.force-controls .val {
+    font-variant-numeric: tabular-nums;
+    color: #444;
+    text-align: right;
+}

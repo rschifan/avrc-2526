@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11d §1-§2 — colour by community, size by centrality</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11d §1-§2 — Colour by community, size by centrality</h1>
+    <p class="lead">Two encoding decisions turn a hairball into a readable network: hue carries
+        group membership, area carries importance. Both are one-liners on top of the layout
+        machinery from 11b.
+        <a href="../../11d-encoding-and-zoom.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>A force layout fixes <em>position</em>; everything else is up to the encoding. Two
+            scales do the work: an ordinal scale mapping <code>community</code> to a categorical
+            palette, and a sqrt scale mapping <code>betweenness centrality</code> to circle
+            radius (so the visual signal grows by <em>area</em>, not radius).</p>
+        <ul>
+            <li><strong><code>d3.scaleOrdinal(d3.schemeTableau10)</code></strong> — the default
+                10-colour categorical palette. Distinguishable, colourblind-aware, and only ten
+                values to worry about. Pass an integer/string and get back a colour string.</li>
+            <li><strong>Why <code>scaleSqrt</code> instead of <code>scaleLinear</code></strong>:
+                humans compare circles by area, not radius. Since
+                <code>area = π · r²</code>, mapping <code>bc</code> through
+                <code>scaleSqrt</code> (which raises to the 0.5) and then assigning to <code>r</code>
+                gives a perceived size that grows linearly with the metric. The second reason:
+                centrality distributions are heavy-tailed, and the square root compresses the
+                long tail so small-degree nodes don't disappear.</li>
+            <li><strong><code>scaleSqrt().domain(d3.extent(nodes, d =&gt; d.bc)).range([3, 14])</code></strong>
+                — minimum 3px so even the least-central node is visible; maximum 14px so the most
+                central one doesn't overwhelm the layout. Both numbers are visual judgements,
+                not derived from the data.</li>
+            <li><strong>Re-tune the collide radius</strong>:
+                <code>forceCollide().radius(d =&gt; r(d.bc) + 1)</code>. With variable node sizes,
+                a constant collide radius would either let large nodes overlap or push small ones
+                too far apart.</li>
+            <li><strong>Native SVG tooltip via <code>&lt;title&gt;</code></strong>: the browser
+                renders it on hover. No custom HTML overlay; useful as a baseline before
+                building a styled tooltip.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            const r = d3.scaleSqrt()
+                .domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            nodes.forEach(d => d.__r = r(d.bc));
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => r(d.bc))
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke");
+            node.append("title")
+                .text(d => `${d.id.replace(/-/g, " ")}\ncommunity ${d.community} · bc ${d.bc.toFixed(3)}`);
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-110))
+                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+            attachWarmup(c.root, sim);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../11c/04-click-isolate.html">&larr; Prev: 11c §4 click-to-isolate</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="02-community-hulls.html">Next: §3 community hulls &rarr;</a>
+    </nav>
+</body>
+
+</html>

@@ -13,6 +13,12 @@
         svg { width: 100%; height: auto; max-width: 100%; display: block;
             border: 1px solid #ddd; background: #fafafa; }
         button { padding: 0.4em 0.9em; font-size: 1em; cursor: pointer; }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -160,5 +166,12 @@
             renderEUE();
         });
     </script>
+
+    <nav class="example-nav">
+        <a href="02-custom-join.html">&larr; Prev: §4 custom join callbacks</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="04-reactive-reshuffle.html">Next: §4 reactive reshuffle &rarr;</a>
+    </nav>
 </body>
 </html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11a §4 — random layout (motivation for force)</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11a §4 — Random layout (why we need a force simulation)</h1>
+    <p class="lead">The full 187-node graph with positions assigned at random. Same join, same marks,
+        no information conveyed about structure. This is the visual problem that
+        <code>d3.forceSimulation</code> exists to solve.
+        <a href="../../11a-networkx-to-d3.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>At 20 nodes the circular layout from §3 worked: a hand-picked geometric arrangement
+            was readable. At 187 nodes that trick fails — any positions we pick without using the
+            <em>structure</em> of the graph hide the community pattern that's there in the data.</p>
+        <ul>
+            <li><strong>The picture is a hairball</strong>: edges cross uniformly, no clusters,
+                no hubs. Communities exist (we'll see them in 11d), but a random placement makes
+                them invisible.</li>
+            <li><strong>A deterministic random generator</strong> (<code>d3.randomLcg(42)</code>)
+                seeds the placement so the same picture renders on every reload. Useful when
+                comparing what changes between examples.</li>
+            <li><strong>What we want</strong>: nodes that share many edges should land near each
+                other; unrelated nodes should drift apart. Derive positions from the graph
+                <em>structure</em>, not from a coin flip.</li>
+            <li><strong>What we'll get in 11b</strong>: <code>d3.forceSimulation</code> — links act
+                like springs (pull connected nodes together), nodes repel each other (push them
+                apart), a centring force keeps the result on screen. Run it for ~300 ticks and the
+                graph "relaxes" into a meaningful layout.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(graph => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+            const rng = d3.randomLcg(42);
+            const nodes = graph.nodes.map(d => ({
+                ...d,
+                x: rng() * c.innerW,
+                y: rng() * c.innerH
+            }));
+            const byId = new Map(nodes.map(d => [d.id, d]));
+
+            c.plot.append("g")
+                .selectAll("line").data(graph.links).join("line")
+                .attr("x1", d => byId.get(d.source).x)
+                .attr("y1", d => byId.get(d.source).y)
+                .attr("x2", d => byId.get(d.target).x)
+                .attr("y2", d => byId.get(d.target).y)
+                .attr("stroke", "#bbb")
+                .attr("stroke-opacity", 0.4);
+
+            c.plot.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("cx", d => d.x).attr("cy", d => d.y)
+                .attr("r", 3.5)
+                .attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="02-fixed-circle.html">&larr; Prev: §3 fixed circle</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="../11b/01-basic-simulation.html">Next: 11b §1 minimum viable simulation &rarr;</a>
+    </nav>
+</body>
+
+</html>

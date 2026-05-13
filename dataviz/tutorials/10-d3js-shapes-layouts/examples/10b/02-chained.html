@@ -13,6 +13,12 @@
             border: 1px solid #ddd; background: #fafafa; }
         button { padding: 0.4em 0.9em; font-size: 1em; cursor: pointer; }
         a { color: #0072B2; }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -42,5 +48,12 @@
                 .attr("fill", "tomato");
         });
     </script>
+
+    <nav class="example-nav">
+        <a href="01-basic-move.html">&larr; Prev: §1 basic transition</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="03-easing.html">Next: §4 easing comparison &rarr;</a>
+    </nav>
 </body>
 </html>

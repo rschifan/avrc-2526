@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11d — Visual encoding and community overlays</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+</head>
+
+<body>
+    <h1>11d — Visual encoding and community overlays</h1>
+    <p class="lead">A force layout fixes <em>position</em>; everything else is up to you.
+        <strong>Colour</strong> carries grouping (community, type, category), <strong>size</strong>
+        carries importance (centrality, degree, weight), and <strong>community hulls</strong> draw the
+        groups explicitly. Three short sections, three encoding decisions — that's enough to turn a
+        hairball into a readable network. (Zoom, foreignObject labels, click-to-isolate animation, and
+        the rest of the visual elaborations belong to <code>11f</code>'s progressive build, where
+        they're introduced one at a time on top of these encodings.)</p>
+
+    <h2>1. Colour by community</h2>
+    <p>The GoT JSON ships a precomputed <code>community</code> integer per node. Map it through an
+        ordinal colour scale and pass the result to <code>fill</code>:</p>
+    <pre><code>const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+node.attr("fill", d =&gt; colour(d.community));</code></pre>
+    <p><code>scaleOrdinal</code> + <code>schemeTableau10</code> is the default we'll use for any small
+        categorical palette — distinguishable, colour-blind aware, and only ten values to worry about.</p>
+
+    <h2>2. Size by centrality</h2>
+    <p>Betweenness centrality is highly skewed. Encode it into the <strong>area</strong> of the circle
+        (not the radius) so the visual signal is proportional to the metric:</p>
+    <pre><code>const r = d3.scaleSqrt()
+    .domain(d3.extent(nodes, d =&gt; d.bc))
+    .range([3, 16]);
+
+node.attr("r", d =&gt; r(d.bc));</code></pre>
+    <p>Two reasons for <code>scaleSqrt</code> over <code>scaleLinear</code>:</p>
+    <ul>
+        <li>SVG's <code>r</code> scales the radius, but humans compare circles by area —
+            <code>scaleSqrt</code> linearises perceived size.</li>
+        <li>Skewed distributions (centrality, populations, weights) benefit from compressing the long tail
+            so the small nodes don't disappear.</li>
+    </ul>
+    <p>The encoded view: hue = community, area = centrality, hover for label and attributes:</p>
+    <div class="container" id="demo-encoded"></div>
+
+    <h2>3. Cluster forces — make communities emerge from the layout</h2>
+    <p>Colour-by-community shows you the grouping after the fact: the layout doesn't know what
+        a community is, you just paint each circle. A stronger move is to <em>tell the layout
+        about communities</em> so they separate during simulation. The trick is a per-datum
+        <code>forceX</code> / <code>forceY</code> where each node aims at its <em>community's</em>
+        centroid:</p>
+    <pre><code>// place each community's target on a ring around the canvas centre
+const cks = [...new Set(nodes.map(d =&gt; d.community))];
+const ang = i =&gt; (i / cks.length) * 2 * Math.PI;
+const rad = 0.30 * Math.min(innerW, innerH);
+const tgt = new Map(cks.map((cm, i) =&gt; [cm, {
+    x: innerW / 2 + rad * Math.cos(ang(i)),
+    y: innerH / 2 + rad * Math.sin(ang(i))
+}]));
+
+sim.force("xCluster", d3.forceX(d =&gt; tgt.get(d.community).x).strength(0.08))
+   .force("yCluster", d3.forceY(d =&gt; tgt.get(d.community).y).strength(0.08));</code></pre>
+    <p>Three things to notice:</p>
+    <ul>
+        <li><strong>The function argument to <code>forceX</code></strong> is the modern idiom: a
+            <em>single</em> <code>forceX</code> with a per-datum target beats writing N separate
+            forces. Same for <code>forceY</code>.</li>
+        <li><strong>Strength 0.08</strong> is gentle enough that link springs still shape
+            within-community geometry; strong enough that communities visibly separate. Drop to
+            0 and you get §2's mixed-up layout back; raise to 0.3 and you get rigid blobs.</li>
+        <li><strong>Cluster forces vs <code>forceCenter</code></strong>: a plain
+            <code>forceCenter</code> wants one centre of mass; cluster forces want many. The
+            two compose, but the practical pattern is to drop <code>forceCenter</code> entirely
+            once you have per-community targets — the targets <em>are</em> the anchors. See
+            <a href="11b-force-layouts.html">11b §2</a> for the underlying argument about
+            <code>forceCenter</code> on disconnected components.</li>
+    </ul>
+    <p>The result: communities pull apart before you even draw a colour. Use this when grouping is
+        the primary signal you want to communicate; compare to §2 above where the communities are
+        present in the data but blended together by the layout:</p>
+    <div class="container" id="demo-cluster"></div>
+    <p>For more than ~10 communities, the plugins
+        <a href="https://github.com/john-guerra/forceInABox" target="_blank">forceInABox</a> and
+        <a href="https://github.com/ericsoco/d3-force-cluster" target="_blank">d3-force-cluster</a>
+        do the same idea with smarter packing. The
+        <a href="11f-progressive-build.html">11f stage 7 stage</a> shows the standalone version.</p>
+
+    <h2>4. Convex hulls — drawing the communities</h2>
+    <p>Colour-by-community gets you most of the way; <strong>drawing the community boundary</strong>
+        finishes the job. <code>d3.polygonHull</code> returns the convex hull of a set of points;
+        feeding the hull through <code>d3.line().curve(d3.curveCatmullRomClosed)</code> turns it into a
+        smooth, closed shape. Recompute on every tick:</p>
+    <pre><code>const hullPath = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.7));
+
+function drawHulls() {
+    const groups = d3.group(nodes, d =&gt; d.community);
+    const hulls = [...groups].map(([key, members]) =&gt; {
+        if (members.length &lt; 3) return null;             // hull needs ≥ 3 points
+        const pts = members.map(d =&gt; [d.x, d.y]);
+        return { key, points: d3.polygonHull(pts) };
+    }).filter(Boolean);
+
+    hullG.selectAll("path").data(hulls, d =&gt; d.key)
+        .join("path")
+        .attr("d", d =&gt; hullPath(d.points))
+        .attr("fill", d =&gt; colour(d.key))
+        .attr("fill-opacity", 0.15)
+        .attr("stroke", d =&gt; colour(d.key))
+        .attr("stroke-width", 1.5)
+        .attr("stroke-opacity", 0.6);
+}
+
+sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */ });</code></pre>
+    <p>The result lifts the community structure out of the colour and turns it into a first-class
+        visual element. Toggle the hulls on and off to see the effect:</p>
+    <p><label><input type="checkbox" id="hull-toggle" checked> show community hulls</label></p>
+    <div class="container" id="demo-hulls"></div>
+
+    <div class="note"><strong>Takeaway.</strong> Categorical attribute → <code>scaleOrdinal</code> →
+        colour. Quantitative attribute → <code>scaleSqrt</code> → radius. Group structure has
+        <em>two</em> answers: encode it into the <em>layout</em> via cluster forces
+        (<code>forceX</code> / <code>forceY</code> with per-community targets), or draw it
+        <em>after</em> the layout via <code>d3.polygonHull</code> + <code>curveCatmullRomClosed</code>.
+        Use cluster forces when grouping is the primary signal; use hulls when the layout already
+        separates groups well and you just want to outline them. The 11f progressive build shows
+        each technique standalone.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://github.com/d3/d3-polygon" target="_blank">d3-polygon</a> — convex hull, area,
+            centroid utilities</li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="11c-interactivity.html">← 11c — Interactivity</a> ·
+        <a href="index.html">L11 index</a> ·
+        <a href="11e-capstone.html">11e — Capstone →</a></p>
+
+    <script>
+        const DATA_URL = "./datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const cloneGraph = () => ({
+                nodes: raw.nodes.map(d => ({ ...d })),
+                links: raw.links.map(d => ({ ...d }))
+            });
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const hullCurve = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.7));
+
+            // ============================================================
+            // §3. cluster forces — community-aware layout
+            // ============================================================
+            // declared above §2 in the source order so the function can be
+            // reused; the demo container appears between §2 and §4 in the DOM.
+            function buildClusterDemo() {
+                const c = makeCanvas("#demo-cluster", 600,
+                    { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleSqrt()
+                    .domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+
+                const cks = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+                const ang = i => (i / cks.length) * 2 * Math.PI - Math.PI / 2;
+                const rad = 0.30 * Math.min(c.innerW, c.innerH);
+                const tgt = new Map(cks.map((cm, i) => [cm, {
+                    x: c.innerW / 2 + rad * Math.cos(ang(i)),
+                    y: c.innerH / 2 + rad * Math.sin(ang(i))
+                }]));
+
+                const link = c.plot.append("g").attr("stroke", "#bbb")
+                    .attr("stroke-opacity", 0.4)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = c.plot.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link",     d3.forceLink(links).id(d => d.id).distance(30))
+                    .force("charge",   d3.forceManyBody().strength(-70))
+                    .force("collide",  d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("xCluster", d3.forceX(d => tgt.get(d.community).x).strength(0.08))
+                    .force("yCluster", d3.forceY(d => tgt.get(d.community).y).strength(0.08))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+                attachWarmup(c.root, sim);
+            }
+            buildClusterDemo();
+
+            // ============================================================
+            // §2. encoded view
+            // ============================================================
+            {
+                const c = makeCanvas("#demo-encoded", 600,
+                    { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleSqrt()
+                    .domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g")
+                    .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+                node.append("title")
+                    .text(d => `${d.id.replace(/-/g, " ")}\ncommunity ${d.community} · bc ${d.bc.toFixed(3)}`);
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+                attachWarmup(c.root, sim);
+            }
+
+            // ============================================================
+            // §4. community hulls
+            // ============================================================
+            {
+                const c = makeCanvas("#demo-hulls", 600,
+                    { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleSqrt()
+                    .domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+
+                const wrap = c.plot.append("g");
+                // hulls go BELOW the network so links/nodes draw on top
+                const hullG = wrap.append("g").attr("class", "hulls");
+                const link = wrap.append("g")
+                    .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+
+                let hullsOn = true;
+                d3.select("#hull-toggle").on("change", function () {
+                    hullsOn = this.checked;
+                    hullG.style("display", hullsOn ? null : "none");
+                });
+
+                function drawHulls() {
+                    if (!hullsOn) return;
+                    const groups = d3.group(nodes, d => d.community);
+                    const hulls = [...groups].map(([key, members]) => {
+                        if (members.length < 3) return null;
+                        const pts = members.map(d => [d.x, d.y]);
+                        const hull = d3.polygonHull(pts);
+                        return hull ? { key, points: hull } : null;
+                    }).filter(Boolean);
+
+                    hullG.selectAll("path").data(hulls, d => d.key)
+                        .join("path")
+                        .attr("d", d => hullCurve(d.points))
+                        .attr("fill", d => colour(d.key))
+                        .attr("fill-opacity", 0.15)
+                        .attr("stroke", d => colour(d.key))
+                        .attr("stroke-width", 1.5)
+                        .attr("stroke-opacity", 0.6)
+                        .attr("vector-effect", "non-scaling-stroke");
+                }
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                        drawHulls();
+                    });
+                attachWarmup(c.root, sim);
+            }
+
+        });
+    </script>
+</body>
+
+</html>

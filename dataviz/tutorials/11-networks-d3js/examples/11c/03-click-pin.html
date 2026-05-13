@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11c §3 — click to pin / unpin</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11c §3 — Click to pin / unpin</h1>
+    <p class="lead">Click a node and it stays where it is — even when the simulation reheats.
+        Click it again and it releases. Same <code>fx</code> / <code>fy</code> mechanism as 11b §5,
+        but driven by an event rather than a hard-coded list.
+        <a href="../../11c-interactivity.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The handler reads the current pin state directly off the datum:
+            <code>d.fx == null</code> means "currently free" → pin at current position.
+            Anything else means "currently pinned" → release. State lives on the data, not in a
+            separate set — which makes it survive reheats, joins, and re-renders for free.</p>
+        <ul>
+            <li><strong>Pin at current position</strong>, not at <code>event.x</code>: the user
+                clicked a node — they expect it to stay where they clicked it, not snap to the
+                pointer's exact pixel.</li>
+            <li><strong>Visual feedback via <code>d3.select(event.currentTarget)</code></strong>:
+                pinned nodes get an orange ring (<code>stroke: #D55E00; stroke-width: 3</code>),
+                free nodes go back to white/1px. The handler only mutates the clicked circle —
+                cheaper than a full re-render.</li>
+            <li><strong>Drag still works</strong>: when the pin is held by
+                <code>fx</code>/<code>fy</code>, dragging the node simply overwrites them with new
+                values; releasing the mouse without resetting them keeps the node pinned at its
+                new location. Comment out the drag block to see clicks-only behaviour.</li>
+            <li><strong>Combine with hover for the canonical interaction trio</strong>: drag to
+                rearrange, hover to inspect connectivity, click to pin permanently. That's the
+                interaction vocabulary every L11 demo uses.</li>
+            <li><strong>Edge case</strong>: <code>event.stopPropagation()</code> is sometimes
+                added to prevent the click from bubbling to a background handler (background
+                clicks reset state in the 11e capstone). Not needed here, but worth remembering
+                for richer apps.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            nodes.forEach(d => d.__r = 4);
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", 4).attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke")
+                .style("cursor", "pointer");
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-90))
+                .force("collide", d3.forceCollide().radius(6))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+            node.call(d3.drag()
+                .container(() => c.plot.node())
+                .on("start", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+                .on("end", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0);
+                    // only release if not pinned by an earlier click
+                    if (!d.__pinned) { d.fx = null; d.fy = null; }
+                }));
+
+            node.on("click", (e, d) => {
+                if (!d.__pinned) {
+                    d.__pinned = true;
+                    d.fx = d.x; d.fy = d.y;
+                    d3.select(e.currentTarget)
+                        .attr("stroke", "#D55E00").attr("stroke-width", 3);
+                } else {
+                    d.__pinned = false;
+                    d.fx = null; d.fy = null;
+                    d3.select(e.currentTarget)
+                        .attr("stroke", "white").attr("stroke-width", 1);
+                }
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="02-hover-neighbours.html">&larr; Prev: §2 hover to highlight</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="04-click-isolate.html">Next: §4 click-to-isolate animation &rarr;</a>
+    </nav>
+</body>
+
+</html>

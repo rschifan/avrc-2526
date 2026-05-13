@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11h — Web Worker simulation</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+    <style>
+        .stacked { display: grid; gap: 1.5em; margin: 1em 0; }
+        .stacked h3 { margin: 0 0 0.4em 0; font-size: 1em; }
+        .stats { font: 13px ui-monospace, monospace; color: #555; min-height: 1.3em;
+                 margin-top: 0.4em; }
+        .stacked svg { display: block; background: #fafafa; border: 1px solid #ddd;
+                       max-width: 100%; height: auto; }
+        .ctrl { display: flex; gap: 1.2em; align-items: center; flex-wrap: wrap;
+                margin: 0.6em 0; font-size: var(--text-md); }
+        .ctrl input[type="range"] { width: 14em; }
+    </style>
+</head>
+
+<body>
+    <h1>11h — Web Worker simulation</h1>
+    <p class="lead"><code>d3.forceSimulation</code> runs synchronously on the main thread.
+        At scale it competes with rendering, event handlers, and any other JS the page is
+        running, and the UI starts to jitter — drag lags, scroll stutters, transitions skip.
+        A Web Worker runs the simulation on a background thread; the main thread is then free
+        to draw the positions and answer pointer events without contention.</p>
+
+    <h2>1. What is a Web Worker</h2>
+    <p>A Web Worker is a separate JavaScript context that runs in its own thread. It cannot
+        touch the DOM, but it can run normal JS, import scripts, and communicate with the main
+        thread via <code>postMessage</code>. The classic use case is exactly ours: long-running
+        CPU-bound work that would otherwise block UI updates.</p>
+    <p>The cost is that data has to be <em>serialised</em> across the boundary. <code>postMessage</code>
+        does a structured clone of whatever you send — slow on large objects, fast on
+        <code>ArrayBuffer</code>s (which can be <em>transferred</em> rather than copied, leaving
+        the sender with an empty handle).</p>
+
+    <h2>2. The protocol</h2>
+    <p>Two files: this page, and <code>_shared/force-worker.js</code>. The protocol is a small
+        set of typed messages:</p>
+    <pre><code>// main → worker
+{ type: "init",       nodes, links, w, h }
+{ type: "reheat",     alpha }
+{ type: "drag-start", id, x, y }
+{ type: "drag-move",  id, x, y }
+{ type: "drag-end",   id }
+
+// worker → main
+{ type: "links",      endpoints: Uint16Array }    // [s0, t0, s1, t1, …]
+{ type: "tick",       positions: Float32Array }   // [x0, y0, x1, y1, …]
+{ type: "end" }</code></pre>
+    <p>Three design choices worth naming:</p>
+    <ul>
+        <li><strong>Endpoint table sent once</strong>, not per tick. Link source / target indices
+            don't change during a static simulation, so we ship them at <code>init</code> and
+            keep the per-tick payload to positions only.</li>
+        <li><strong>Positions as a typed array</strong>. <code>Float32Array</code> instead of an
+            array of objects: half the memory, faster traversal, and — crucially — its backing
+            <code>ArrayBuffer</code> is <em>transferable</em>. The worker hands ownership over;
+            no copy is made.</li>
+        <li><strong>Drag as messages</strong>, not as a per-frame call into the worker. The main
+            thread sends a message; the worker writes <code>fx</code> / <code>fy</code> on its
+            copy of the node and the simulation handles the rest.</li>
+    </ul>
+
+    <h2>3. Sending data with Transferables</h2>
+    <p>The second argument to <code>postMessage</code> is a list of objects to <em>transfer</em>
+        instead of clone:</p>
+    <pre><code>const pos = new Float32Array(nodes.length * 2);
+for (let i = 0; i &lt; nodes.length; i++) {
+    pos[i * 2]     = nodes[i].x;
+    pos[i * 2 + 1] = nodes[i].y;
+}
+self.postMessage({ type: "tick", positions: pos.buffer }, [pos.buffer]);</code></pre>
+    <p>Without the second argument, every tick would <em>clone</em> the entire array. At 10k
+        nodes that's 80 KB cloned 60 times per second — measurable. With the transfer, the
+        buffer hops to the main thread in O(1).</p>
+
+    <h2>4. Reading the positions on the main thread</h2>
+    <pre><code>worker.onmessage = (e) =&gt; {
+    const m = e.data;
+    if (m.type === "links") endpoints = new Uint16Array(m.endpoints);
+    if (m.type === "tick")  { positions = new Float32Array(m.positions); draw(); }
+    if (m.type === "end")   { /* simulation cooled */ }
+};
+
+// One <line> per edge and one <circle> per node, created once at init.
+// On every tick we just update attributes — no DOM churn.
+function draw() {
+    if (!positions || !endpoints) return;
+    lines
+        .attr("x1", (_, i) =&gt; positions[endpoints[i*2]     * 2])
+        .attr("y1", (_, i) =&gt; positions[endpoints[i*2]     * 2 + 1])
+        .attr("x2", (_, i) =&gt; positions[endpoints[i*2 + 1] * 2])
+        .attr("y2", (_, i) =&gt; positions[endpoints[i*2 + 1] * 2 + 1]);
+    circles
+        .attr("cx", (_, i) =&gt; positions[i * 2])
+        .attr("cy", (_, i) =&gt; positions[i * 2 + 1]);
+}</code></pre>
+    <p>The main thread keeps two typed arrays around (endpoints and positions) and writes
+        attributes from them — no node objects, no link objects, no lookup table for the
+        rendering loop. Same SVG marks as every other demo in L11; the only difference is
+        <em>where the positions come from</em>.</p>
+
+    <h2>5. Side-by-side: same simulation, on-thread vs in-worker</h2>
+    <p>Both panes render the same SVG (one <code>&lt;line&gt;</code> per edge,
+        one <code>&lt;circle&gt;</code> per node). The top pane runs the simulation on the main
+        thread; the bottom pane runs it in <code>_shared/force-worker.js</code>. Increase the
+        node count; the on-thread version starts to jitter while the in-worker version stays
+        smooth. (Drag is supported by the worker protocol — see <code>force-worker.js</code> —
+        but isn't wired into the renderer here: the focus is on showing the simulation thread
+        alone.)</p>
+
+    <div class="ctrl">
+        <label>node count
+            <input type="range" id="n-slider" min="200" max="2500" step="100" value="800">
+            <span id="n-val" style="font-variant-numeric: tabular-nums;">800</span>
+        </label>
+        <span style="color: #777;">presets:</span>
+        <button data-preset="300">300</button>
+        <button data-preset="800">800</button>
+        <button data-preset="1500">1.5k</button>
+        <button data-preset="2500">2.5k</button>
+        <button id="restart">Reheat both</button>
+    </div>
+
+    <div class="stacked">
+        <div>
+            <h3>Main-thread simulation</h3>
+            <div id="main-pane"></div>
+            <div class="stats" id="main-stats">—</div>
+        </div>
+        <div>
+            <h3>Worker-thread simulation</h3>
+            <div id="worker-pane"></div>
+            <div class="stats" id="worker-stats">—</div>
+        </div>
+    </div>
+
+    <h2>6. When to introduce a worker</h2>
+    <ul>
+        <li><strong>Not before you need it.</strong> A worker doubles the moving parts: separate
+            file, message protocol, serialisation. For under ~1k nodes the main-thread version
+            is simpler and just as fast.</li>
+        <li><strong>Add it when the simulation noticeably blocks UI</strong>: scrolling stutters
+            during warmup, drag feels laggy, layout-heavy pages co-located with the chart
+            judder. The trigger is <em>main-thread responsiveness</em>, not raw simulation
+            speed.</li>
+        <li><strong>The hard parts</strong>: shipping <em>updates</em> to the simulation
+            (new nodes, removed nodes, attribute changes) needs careful protocol design.
+            The dynamic-graph version is covered in
+            <a href="../12-advanced-network-viz/12f-dynamic-graphs.html">12f</a> in the
+            next class.</li>
+    </ul>
+
+    <div class="note"><strong>Takeaway.</strong> The simulation doesn't need the DOM and the
+        rendering doesn't need the simulation. A Web Worker splits them onto two threads;
+        <code>Transferable</code> typed arrays make the message channel cheap. The result: the
+        layout converges in the background while the main thread stays responsive to drag,
+        hover, scroll, and any other UI work the page is doing.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers"
+            target="_blank">MDN — Using Web Workers</a></li>
+        <li><a href="https://observablehq.com/@mbostock/force-directed-graph-with-web-worker"
+            target="_blank">Observable — force-directed graph with Web Worker</a> (Mike Bostock)</li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Transferable_objects"
+            target="_blank">MDN — Transferable objects</a></li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="11f-progressive-build.html">← 11f — Progressive build</a> ·
+        <a href="index.html">L11 index</a></p>
+
+    <script>
+        const W = 800, H = 460;
+        let mainSim = null;
+        let worker = null;
+
+        function genGraph(n) {
+            const nodes = d3.range(n).map(i => ({
+                id: i, color: d3.schemeTableau10[i % 10]
+            }));
+            const links = [];
+            for (let i = 0; i < n; i++) {
+                for (let k = 0; k < 4; k++) {
+                    const t = Math.floor(Math.random() * n);
+                    if (t !== i) links.push({ source: i, target: t });
+                }
+            }
+            return { nodes, links };
+        }
+
+        function makeSvg(sel) {
+            const svg = d3.select(sel).append("svg")
+                .attr("viewBox", `0 0 ${W} ${H}`)
+                .attr("preserveAspectRatio", "xMidYMid meet")
+                .attr("width", W).attr("height", H);
+            const linkG = svg.append("g")
+                .attr("stroke", "#999").attr("stroke-opacity", 0.4);
+            const nodeG = svg.append("g")
+                .attr("stroke", "white").attr("stroke-width", 0.6);
+            return { svg, linkG, nodeG };
+        }
+
+        // ============================================================
+        // main-thread version: simulation + SVG updates share the thread
+        // ============================================================
+        function runMain(n) {
+            d3.select("#main-pane").selectAll("*").remove();
+            const { nodes, links } = genGraph(n);
+            const { linkG, nodeG } = makeSvg("#main-pane");
+
+            const link = linkG.selectAll("line").data(links).join("line");
+            const node = nodeG.selectAll("circle").data(nodes).join("circle")
+                .attr("r", 3).attr("fill", d => d.color);
+
+            let frames = 0, last = performance.now(), totalMs = 0;
+            if (mainSim) mainSim.stop();
+            mainSim = d3.forceSimulation(nodes)
+                .force("link",   d3.forceLink(links).distance(20))
+                .force("charge", d3.forceManyBody().strength(-25))
+                .force("x", d3.forceX(W / 2).strength(0.1))
+                .force("y", d3.forceY(H / 2).strength(0.1))
+                .alphaDecay(0.02)
+                .on("tick", () => {
+                    const t0 = performance.now();
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    totalMs += performance.now() - t0;
+                    frames++;
+                    const now = performance.now();
+                    if (now - last >= 500) {
+                        const fps = (frames * 1000 / (now - last)).toFixed(0);
+                        const ms  = (totalMs / Math.max(1, frames)).toFixed(1);
+                        d3.select("#main-stats").text(
+                            `${n} nodes · ${fps} fps · ${ms} ms/tick · main thread`);
+                        frames = 0; last = now; totalMs = 0;
+                    }
+                })
+                .on("end", () => d3.select("#main-stats").text(
+                    `${n} nodes · idle (frozen) · main thread`));
+        }
+
+        // ============================================================
+        // worker version: simulation in _shared/force-worker.js
+        // ============================================================
+        function runWorker(n) {
+            d3.select("#worker-pane").selectAll("*").remove();
+            const { nodes, links } = genGraph(n);
+            const { linkG, nodeG } = makeSvg("#worker-pane");
+
+            // Create the marks once, bound to indices so we can read positions
+            // and endpoints out of typed arrays without object lookups.
+            const lines = linkG.selectAll("line").data(d3.range(links.length))
+                .join("line");
+            const circles = nodeG.selectAll("circle").data(d3.range(n))
+                .join("circle")
+                .attr("r", 3).attr("fill", i => nodes[i].color);
+
+            if (worker) worker.terminate();
+            worker = new Worker("./_shared/force-worker.js");
+
+            let endpoints = null;
+            let positions = null;
+            let frames = 0, last = performance.now(), totalMs = 0;
+
+            function draw() {
+                if (!positions || !endpoints) return;
+                lines
+                    .attr("x1", (_, i) => positions[endpoints[i * 2]     * 2])
+                    .attr("y1", (_, i) => positions[endpoints[i * 2]     * 2 + 1])
+                    .attr("x2", (_, i) => positions[endpoints[i * 2 + 1] * 2])
+                    .attr("y2", (_, i) => positions[endpoints[i * 2 + 1] * 2 + 1]);
+                circles
+                    .attr("cx", (_, i) => positions[i * 2])
+                    .attr("cy", (_, i) => positions[i * 2 + 1]);
+            }
+
+            worker.onmessage = (e) => {
+                const m = e.data;
+                if (m.type === "links") {
+                    endpoints = new Uint16Array(m.endpoints);
+                } else if (m.type === "tick") {
+                    positions = new Float32Array(m.positions);
+                    const t0 = performance.now();
+                    draw();
+                    totalMs += performance.now() - t0;
+                    frames++;
+                    const now = performance.now();
+                    if (now - last >= 500) {
+                        const fps = (frames * 1000 / (now - last)).toFixed(0);
+                        const ms  = (totalMs / Math.max(1, frames)).toFixed(1);
+                        d3.select("#worker-stats").text(
+                            `${n} nodes · ${fps} fps · ${ms} ms/render · in worker`);
+                        frames = 0; last = now; totalMs = 0;
+                    }
+                } else if (m.type === "end") {
+                    d3.select("#worker-stats").text(
+                        `${n} nodes · idle (frozen) · in worker`);
+                }
+            };
+
+            worker.postMessage({ type: "init", nodes, links, w: W, h: H });
+        }
+
+        function go() {
+            const n = +document.getElementById("n-slider").value;
+            document.getElementById("n-val").textContent = n;
+            runMain(n);
+            runWorker(n);
+        }
+        document.getElementById("n-slider").addEventListener("change", go);
+        document.getElementById("restart").addEventListener("click", go);
+        document.querySelectorAll("button[data-preset]").forEach(b =>
+            b.addEventListener("click", () => {
+                document.getElementById("n-slider").value = b.dataset.preset;
+                go();
+            }));
+        go();
+    </script>
+</body>
+
+</html>

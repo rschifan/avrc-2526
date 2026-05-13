@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11f — Stage 6: perf and scale instrumentation</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11f — Stage 6: Perf and scale instrumentation</h1>
+    <p class="lead">An FPS counter and three throttling knobs — the first optimizations to reach
+        for before switching renderer. With 187 nodes it's overkill; the point is to see the
+        knobs so you can apply them at 2000.
+        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+    </p>
+
+    <div class="note">
+        <h3>What this stage adds (vs the previous stage)</h3>
+        <p>Three SVG-side performance levers, in order of impact: a <em>tick budget</em>
+            (don't repaint every tick), <em>idle freeze</em> (stop work once cool), and
+            <em>label-on-demand</em> (only update labels when at least one is visible). Each
+            buys you ~2× the workload before SVG starts to choke.
+        </p>
+        <ul>
+            <li><strong>Tick budget</strong>: <code>if (++tickCount % N) return;</code> skips
+                paint frames. <code>N = 2</code> halves the per-tick DOM work; the simulation
+                still updates positions every tick (visually smoother than throttling the
+                simulation itself). Drag responsiveness starts to suffer above ~3.</li>
+            <li><strong>Idle freeze</strong>: once <code>alpha &lt; alphaMin</code> the
+                simulation fires <code>"end"</code> and stops emitting ticks — so the FPS counter
+                naturally drops to zero. The overlay reads "idle (frozen)".</li>
+            <li><strong>Label-on-demand</strong>: when every label is hidden (e.g. zoomed out),
+                skip the <code>label.attr("x", …)</code> update. With 187 labels it saves a few
+                hundred attribute writes per tick.</li>
+            <li><strong><code>vector-effect: non-scaling-stroke</code></strong>: lets you scale
+                the wrapper <code>&lt;g&gt;</code> without recomputing per-element stroke widths.
+                Used by every L11 example; mention here because in a pure-perf context it's a
+                free 5–10% speedup on dense edge sets.</li>
+            <li><strong>What this is <em>not</em></strong>: a quadtree-aware spatial index, a
+                different renderer (Canvas / WebGL), or a Web Worker offload — those are bigger
+                changes.
+                <a href="../11h/01-worker-simulation.html">11h</a> shows the Worker option; the
+                numbers below show where the simple SVG pipeline starts to struggle.
+            </li>
+            <li><strong>How to read the FPS counter</strong>: 60 = monitor refresh ceiling. On
+                this dataset the simulation runs at 60 for several seconds, then cools and emits
+                the <code>"end"</code> event; the overlay switches to "idle (frozen)". If you
+                were on 2000 nodes you'd see ticks barely keeping up with the simulation —
+                that's the canvas signal.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            nodes.forEach(d => d.__r = r(d.bc));
+
+            // FPS overlay — counts simulation ticks AND painted frames separately,
+            // so the throttle's effect is visible.
+            const fpsLabel = c.root.append("text")
+                .attr("x", 8).attr("y", 16)
+                .style("font", "11px ui-monospace, monospace")
+                .style("fill", "#555");
+            let lastT = performance.now(), simTicks = 0, paints = 0;
+            function bump(painted) {
+                simTicks++;
+                if (painted) paints++;
+                const now = performance.now();
+                if (now - lastT >= 500) {
+                    const tps = (simTicks * 1000 / (now - lastT)).toFixed(0);
+                    const fps = (paints * 1000 / (now - lastT)).toFixed(0);
+                    fpsLabel.text(`sim ticks/s: ${tps}  ·  painted fps: ${fps}`);
+                    simTicks = 0; paints = 0; lastT = now;
+                }
+            }
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#999").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => r(d.bc))
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke");
+
+            const TICK_BUDGET = 2;
+            let tickCount = 0;
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge", d3.forceManyBody().strength(-110))
+                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    if (++tickCount % TICK_BUDGET) { bump(false); return; }
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    bump(true);
+                });
+            sim.on("end.freeze", () => fpsLabel.text("idle (frozen)"));
+            attachWarmup(c.root, sim);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="05-foreignobject-labels.html">&larr; Prev: foreignObject labels</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="07-cluster-forces.html">Next: stage 7 — cluster forces &rarr;</a>
+    </nav>
+</body>
+
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11b §1 — minimum viable force simulation</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11b §1 — Minimum viable force simulation</h1>
+    <p class="lead">Three built-in forces + a hand-written boundary force are enough for a working
+        layout. The simulation iterates; on every <code>tick</code> we copy node positions onto the
+        SVG marks.
+        <a href="../../11b-force-layouts.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>A force layout simulates physics: edges act like springs, every node repels every
+            other, a centring force keeps the result on screen. The simulation runs ~300 ticks,
+            cools down, and emits an <code>"end"</code> event — by then the graph has "relaxed"
+            into a shape that reflects its connectivity.</p>
+        <ul>
+            <li><strong><code>d3.forceSimulation(nodes)</code></strong> is the iterator. You attach
+                forces with <code>.force(name, force)</code>; you read positions in a
+                <code>"tick"</code> handler. The tick handler is the hinge between the simulation
+                (which mutates <code>d.x</code>, <code>d.y</code>) and the data join (which renders
+                them).</li>
+            <li><strong>Standard forces</strong>:
+                <ul>
+                    <li><code>forceLink</code>: springs along edges. <code>.id(d =&gt; d.id)</code>
+                        tells it how to resolve link endpoints to node objects.</li>
+                    <li><code>forceManyBody</code>: pairwise repulsion (default <code>-30</code>).</li>
+                    <li><code>forceCenter</code>: anchors the centre of mass.</li>
+                </ul>
+            </li>
+            <li><strong>The <code>warmup</code> overlay</strong> (<code>attachWarmup(svg, sim)</code>)
+                hides the layout while it converges — without it, students see nodes jitter from
+                random positions into the final shape, which is confusing on first viewing.</li>
+        </ul>
+        <p style="margin-top: 0.6em;"><strong>This is the one place we use
+            <code>fitToCanvas</code>.</strong> The simulation above has no boundary — only
+            <code>forceCenter</code>. Without something else, the layout can drift past the
+            canvas edges. <code>fitToCanvas(wrap, sim, nodes, innerW, innerH)</code> attaches to
+            the simulation's <code>"end"</code> event: it computes the bounding box of node
+            positions and applies a single transform to the wrapping <code>&lt;g&gt;</code> so
+            the graph snaps into view. A useful one-off <em>zoom-to-fit</em>, but not the
+            default for L11 — see the tutorial's §1 for the alternative pattern
+            (<code>boundaryForce</code>, a custom D3 force that clamps positions tick-by-tick).
+            Every other L11 demo uses neither: just a gentle
+            <code>forceX(cx).strength(0.1)</code> + <code>forceY(cy).strength(0.1)</code> pair,
+            the modern default, which keeps the layout on canvas without either an after-the-fact
+            transform or a hard clip.</p>
+    </div>
+
+    <p><button id="restart">Restart simulation</button></p>
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const cloneGraph = () => ({
+                nodes: raw.nodes.map(d => ({ ...d })),
+                links: raw.links.map(d => ({ ...d }))
+            });
+
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            let sim;
+
+            function run() {
+                c.plot.selectAll("*").remove();
+                c.root.selectAll(".warmup-overlay").remove();
+                const { nodes, links } = cloneGraph();
+                nodes.forEach(d => d.__r = 4);
+
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g")
+                    .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", 4).attr("fill", "#0072B2")
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+
+                if (sim) sim.stop();
+                sim = d3.forceSimulation(nodes)
+                    .force("link",   d3.forceLink(links).id(d => d.id))
+                    .force("charge", d3.forceManyBody())
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+                // Demo of fit-to-canvas: after the simulation cools, rescale
+                // the wrapping <g> so the natural layout fills the canvas.
+                // This is the ONE example in L11 that uses this pattern; every
+                // later demo uses gentle forceX/forceY centring instead — see
+                // tutorial 11b §1 for the boundaryForce alternative.
+                fitToCanvas(wrap, sim, nodes, c.innerW, c.innerH, { padding: 30 });
+                attachWarmup(c.root, sim);
+            }
+            run();
+            document.getElementById("restart").addEventListener("click", run);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../11a/03-random-layout.html">&larr; Prev: 11a §4 random layout</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="02-tuned-forces.html">Next: §3 tuned forces &rarr;</a>
+    </nav>
+</body>
+
+</html>

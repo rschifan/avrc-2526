@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>10e §4 — rescale the scales</title>
+    <style>
+        body { max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+            line-height: 1.55; color: #222; font-size: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        h1 { font-size: 1.4em; margin-bottom: 0.3em; }
+        .lead { color: #555; margin-top: 0; }
+        .lead a { color: #0072B2; }
+        svg { width: 100%; height: auto; max-width: 100%; display: block;
+            border: 1px solid #ddd; background: #fafafa; cursor: grab; }
+        svg:active { cursor: grabbing; }
+        .axis text { font-size: 13px; fill: #555; }
+        .axis path, .axis line { stroke: #bbb; }
+        .warn { background: #fff4e5; border-left: 4px solid #E69F00;
+            padding: 0.6em 0.9em; margin: 1em 0; font-size: 14px; }
+        .note { background: #f3f6fb; border-left: 4px solid #0072B2;
+            padding: 0.7em 1em; margin: 1em 0; font-size: 14.5px; }
+        .note h3 { margin: 0 0 0.4em 0; font-size: 1.02em; }
+        .note ul { margin: 0.3em 0 0.1em 1.2em; padding: 0; }
+        .note li { margin-bottom: 0.25em; }
+        code { background: #eef2f7; padding: 0 0.25em; border-radius: 2px; }
+        .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
+        a { color: #0072B2; }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>10e §4 — Rescale the scales</h1>
+    <p class="lead">The right pattern for axes-aware charts: every <code>zoom</code> event calls
+        <code>transform.rescaleX(x)</code> and <code>rescaleY(y)</code> to derive fresh scales,
+        then reapplies them to <em>both</em> the dots and the axis generators. Tick labels and
+        dot positions are computed from the same rescaled scale, so they stay aligned at every
+        zoom level. Dot radii (in screen pixels) stay constant.
+        <a href="../../10e-zoom-and-navigation.html">Source tutorial &rarr;</a></p>
+
+    <div class="warn">Still imperfect: pan to the edge and dots leak outside the plot rectangle,
+        over the axes and into the margins. The next example fixes that with a clip-path.</div>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The canonical pattern for zooming a chart that has axes. Instead of moving SVG
+            geometry, we move the <em>scales</em>: every zoom event derives fresh
+            <code>x</code> and <code>y</code> scales from the transform, then redraws axes and
+            repositions dots against those new scales. Visuals stay consistent because every
+            mark is recomputed from the same source of truth.</p>
+        <ul>
+            <li><strong><code>transform.rescaleX(x)</code></strong> returns a <em>new</em>
+                scale function. Its domain is the same as <code>x</code>; its range has been
+                shifted and stretched by <code>transform.x</code> and <code>transform.k</code>.
+                The original <code>x</code> is untouched, which is why you can reset to identity
+                at any point. The same holds for <code>rescaleY</code>.</li>
+            <li><strong>Two things to update in the handler</strong>, both using the rescaled
+                scale: (1) the axes via <code>axisG.call(d3.axisBottom(zx))</code> so tick
+                positions and labels refresh, and (2) the data marks via
+                <code>cx = zx(d.gdpPercap)</code> so they sit at the new pixel positions.
+                Forget either one and they drift apart again.</li>
+            <li><strong>Constant pixel radii</strong>: the dots' <code>r</code> attribute is
+                never touched, so a 5-pixel dot stays 5 pixels at every zoom level. Stroke
+                widths likewise. This is almost always what scatter readers expect.</li>
+            <li><strong>Why this generalises</strong>: anything derived from the scales —
+                gridlines, axis labels, hover tooltip positions, brush extents — refreshes for
+                free when you reapply the rescaled scale. With the group-transform pattern you
+                have to bookkeep which elements are inside the wrapper.</li>
+            <li><strong>The remaining bug</strong>: dots are not constrained to the plot
+                rectangle. Pan far enough and circles render over the axis ticks and into the
+                margin — visually noisy and confusing. Fixed in §5 with a <code>clipPath</code>.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+    <script>
+        // ─────────────────────────────────────────────────────────────────────
+        const PALETTE = {
+            Africa: "#009E73", Americas: "#D55E00", Asia: "#0072B2",
+            Europe: "#CC79A7", Oceania: "#E69F00"
+        };
+        const c = makeCanvas("#demo", 420, {
+            margin: { top: 20, right: 30, bottom: 50, left: 60 }
+        });
+
+        d3.csv("../../datasets/gapminder.csv", d => ({
+            country: d.country, continent: d.continent, year: +d.year,
+            gdpPercap: +d.gdpPercap, lifeExp: +d.lifeExp, pop: +d.pop
+        })).then(raw => {
+            const data = raw.filter(d => d.year === 2007);
+            const x = d3.scaleLog().domain([200, 100000]).range([0, c.innerW]);
+            const y = d3.scaleLinear().domain([35, 85]).range([c.innerH, 0]);
+            const r = d3.scaleSqrt().domain([0, d3.max(data, d => d.pop)]).range([2, 18]);
+
+            const xAxisG = c.plot.append("g").attr("class", "axis")
+                .attr("transform", `translate(0, ${c.innerH})`)
+                .call(d3.axisBottom(x).ticks(6, "~s"));
+            const yAxisG = c.plot.append("g").attr("class", "axis")
+                .call(d3.axisLeft(y));
+
+            const dots = c.plot.selectAll("circle").data(data).join("circle")
+                .attr("cx", d => x(d.gdpPercap))
+                .attr("cy", d => y(d.lifeExp))
+                .attr("r",  d => r(d.pop))
+                .attr("fill", d => PALETTE[d.continent])
+                .attr("opacity", 0.75)
+                .attr("stroke", "white").attr("stroke-width", 1);
+            dots.append("title").text(d => `${d.country}\n${d.lifeExp.toFixed(1)} yr`);
+
+            const zoom = d3.zoom()
+                .scaleExtent([1, 16])
+                .extent([[0, 0], [c.innerW, c.innerH]])
+                .translateExtent([[0, 0], [c.innerW, c.innerH]])
+                .on("zoom", ({ transform }) => {
+                    const zx = transform.rescaleX(x);
+                    const zy = transform.rescaleY(y);
+                    xAxisG.call(d3.axisBottom(zx).ticks(6, "~s"));
+                    yAxisG.call(d3.axisLeft(zy));
+                    dots.attr("cx", d => zx(d.gdpPercap))
+                        .attr("cy", d => zy(d.lifeExp));
+                });
+            c.root.call(zoom);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="02-naive-group-zoom.html">&larr; Prev: §3 naïve group transform</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="04-clipped-zoom.html">Next: §5 clipped zoomable scatter &rarr;</a>
+    </nav>
+</body>
+
+</html>

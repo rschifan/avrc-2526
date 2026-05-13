@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11c §1 — drag with d3.drag</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11c §1 — Drag with <code>d3.drag</code></h1>
+    <p class="lead">Dragging a node is "pin while the pointer is down": set
+        <code>fx</code> / <code>fy</code> on the dragged datum, follow the pointer, then release on
+        mouseup. Same mechanism as 11b §5 — just animated by a pointer.
+        <a href="../../11c-interactivity.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p><code>d3.drag()</code> is a behaviour object (like <code>d3.zoom</code>) that wires
+            up pointerdown / move / up listeners and emits <code>start</code> /
+            <code>drag</code> / <code>end</code> events. You handle those three events to set,
+            update, and clear <code>fx</code> / <code>fy</code> on the dragged node.</p>
+        <ul>
+            <li><strong>On <code>start</code></strong>:
+                <code>d.fx = d.x; d.fy = d.y;</code> — pin at the <em>current</em> position so the
+                node doesn't snap to the pointer's coordinate system. Also
+                <code>sim.alphaTarget(0.3).restart()</code>: keep the simulation simmering while
+                dragging, so the rest of the graph reacts instead of freezing into place.</li>
+            <li><strong>On <code>drag</code></strong>: <code>d.fx = event.x; d.fy = event.y;</code>
+                — follow the pointer. The next tick reads these fixed values and overwrites
+                <code>d.x</code> / <code>d.y</code>; everything else moves under normal force
+                physics.</li>
+            <li><strong>On <code>end</code></strong>:
+                <code>d.fx = null; d.fy = null;</code> — release. Also
+                <code>sim.alphaTarget(0)</code> so the simulation cools back down to rest. The
+                <code>!event.active</code> check guards against multitouch: only the last finger
+                lifting should reset the target.</li>
+            <li><strong><code>node.call(drag(sim))</code></strong> applies the behaviour to every
+                circle in the selection — D3 attaches the right listeners under the hood.</li>
+            <li><strong>This is the foundation</strong> for click-to-pin (next example) and the
+                shift+click isolate-animation in 11e. Both are variations on
+                "imperatively set <code>fx</code> / <code>fy</code> on the affected node(s)".</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            nodes.forEach(d => d.__r = 4);
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", 4).attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke")
+                .style("cursor", "grab");
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-90))
+                .force("collide", d3.forceCollide().radius(6))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+            node.call(d3.drag()
+                .container(() => c.plot.node())
+                .on("start", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+                .on("end", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0);
+                    d.fx = null; d.fy = null;
+                }));
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../11b/03-pinned-nodes.html">&larr; Prev: 11b §5 pinned nodes</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="02-hover-neighbours.html">Next: §2 hover to highlight neighbours &rarr;</a>
+    </nav>
+</body>
+
+</html>

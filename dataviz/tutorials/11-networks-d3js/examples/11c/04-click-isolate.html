@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11c §4 — click-to-isolate animation</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11c §4 — Click-to-isolate animation</h1>
+    <p class="lead">Click any node → it slides to the left, its neighbours stack on the right,
+        active edges follow, the rest fades. Click anywhere again → everything transitions back
+        to where it was and the force layout resumes.
+        <a href="../../11c-interactivity.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>Two animations driven by a three-state machine
+            (<code>idle</code> / <code>transitioning</code> / <code>isolated</code>) and a
+            position snapshot taken at click time.</p>
+        <ul>
+            <li><strong>Click on a node</strong>: snapshot every node's current
+                <code>(x, y)</code>, stop the simulation, animate the focal node and its
+                neighbours to the destination layout (left anchor + right column on the right).
+                Clicking another node mid-isolation snaps the marks back to the snapshot and
+                isolates the new node immediately.</li>
+            <li><strong>Click the empty background</strong>: animate every mark back to its
+                snapshot position. When the transition ends, sync the simulation's node data
+                to the snapshot and call <code>sim.alpha(0.15).restart()</code> so the layout
+                is alive again — drag, hover and the force springs all work.</li>
+            <li><strong>The destination map</strong>: <code>dest = Map(id → {x, y})</code>.
+                The focal id maps to the left anchor; each neighbour id to its slot on the
+                right column. Both the node transition and the link-endpoint transition read
+                from this same map, so edges follow the nodes that move them.</li>
+            <li><strong>Use case</strong>: focused view of one node's ego network. The capstone
+                in 11e binds it to <code>shift+click</code> so the plain click can still pin.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            nodes.forEach(d => d.__r = 4);
+
+            const link = c.plot.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line");
+            const node = c.plot.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", 4).attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .style("cursor", "pointer");
+            // Labels are only shown for the right-column neighbours during
+            // isolation. The group exists empty and gets populated on isolate.
+            const labelG = c.plot.append("g")
+                .attr("class", "isolate-labels")
+                .style("font-size", "11px")
+                .style("pointer-events", "none")
+                .style("paint-order", "stroke")
+                .style("stroke", "white").style("stroke-width", 3)
+                .style("fill", "#222");
+
+            // Hover label: one shared <text> that follows the currently
+            // hovered node during the normal (idle) layout. Hidden during
+            // isolation, where the dedicated isolate-labels take over.
+            let hoveredNode = null;
+            const hoverLabel = c.plot.append("text")
+                .attr("class", "hover-label")
+                .attr("text-anchor", "middle")
+                .style("font-size", "11px")
+                .style("pointer-events", "none")
+                .style("paint-order", "stroke")
+                .style("stroke", "white").style("stroke-width", 3)
+                .style("fill", "#222")
+                .style("opacity", 0);
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-90))
+                .force("collide", d3.forceCollide().radius(6))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    if (hoveredNode)
+                        hoverLabel.attr("x", hoveredNode.x)
+                                  .attr("y", hoveredNode.y - 4 - 4);  // r=4, gap=4
+                });
+            attachWarmup(c.root, sim);
+
+            node.call(d3.drag()
+                .container(() => c.plot.node())
+                .on("start", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0.3).restart();
+                    d.fx = d.x; d.fy = d.y;
+                })
+                .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+                .on("end", (e, d) => {
+                    if (!e.active) sim.alphaTarget(0);
+                    d.fx = null; d.fy = null;
+                }));
+
+            // Pre-computed neighbour set per node id. See 11c §2.
+            const neighbors = buildNeighbors(nodes, links);
+
+            // ---- isolation state machine ----
+            // phase: 'idle'           — normal force layout, click a node to isolate
+            //        'transitioning'  — a transition is running, ignore input
+            //        'isolated'       — focused view, click anywhere to dismiss
+            let phase = "idle";
+            let snapshot = null;
+            let phaseTimer = null;        // pending setTimeout from previous transition
+            const DURATION = 800;
+
+            function isolate(focal) {
+                clearTimeout(phaseTimer);
+                phase = "transitioning";
+                sim.stop();
+                // Take the snapshot only on the first isolation — subsequent
+                // chained clicks re-isolate from the same baseline.
+                if (!snapshot) snapshot = new Map(nodes.map(n => [n.id, { x: n.x, y: n.y }]));
+
+                const others = [...neighbors.get(focal.id)].filter(id => id !== focal.id);
+
+                // Centre the right column around innerH/2 regardless of count.
+                // A single neighbour sits exactly at the focal's vertical
+                // level so the connecting line is horizontal; with more, we
+                // spread them around the centre with at least 24 px between.
+                const PITCH = 24;
+                const span  = Math.min(c.innerH - 60, (others.length - 1) * PITCH);
+                const top   = c.innerH / 2 - span / 2;
+                const yOf   = others.length <= 1
+                    ? () => c.innerH / 2
+                    : i  => top + (span * i) / (others.length - 1);
+
+                // Move the right column further inside the canvas so neighbour
+                // labels have room to extend rightward without clipping.
+                const dest = new Map();
+                dest.set(focal.id, { x: 80, y: c.innerH / 2 });
+                others.forEach((id, i) =>
+                    dest.set(id, { x: c.innerW - 220, y: yOf(i) }));
+
+                // idOf comes from ../_shared/utils.js
+                const destX = ref => dest.has(idOf(ref)) ? dest.get(idOf(ref)).x : ref.x;
+                const destY = ref => dest.has(idOf(ref)) ? dest.get(idOf(ref)).y : ref.y;
+                const isActive = l =>
+                    idOf(l.source) === focal.id || idOf(l.target) === focal.id;
+
+                node.transition().duration(DURATION)
+                    .attr("cx", n => destX(n))
+                    .attr("cy", n => destY(n))
+                    .attr("r", n => n.id === focal.id ? 9 : 4)
+                    .attr("fill", n => n.id === focal.id ? "#D55E00" : "#0072B2")
+                    .attr("opacity", n =>
+                        (n.id === focal.id || others.includes(n.id)) ? 1 : 0);
+
+                link.transition().duration(DURATION)
+                    .attr("x1", l => destX(l.source))
+                    .attr("y1", l => destY(l.source))
+                    .attr("x2", l => destX(l.target))
+                    .attr("y2", l => destY(l.target))
+                    .attr("opacity", l => isActive(l) ? 0.85 : 0);
+
+                // After the isolation animation finishes, label the focal node
+                // (above it) and every right-column neighbour (next to it).
+                // Labels fade in; they stay until dismiss or a chained click.
+                phaseTimer = setTimeout(() => {
+                    phase = "isolated";
+                    const labelData = [
+                        { id: focal.id, kind: "focal" },
+                        ...others.map(id => ({ id, kind: "right" }))
+                    ];
+                    const labels = labelG.selectAll("text")
+                        .data(labelData, d => d.id);
+                    labels.exit().remove();
+                    labels.enter().append("text")
+                        .attr("opacity", 0)
+                      .merge(labels)
+                        // Focal: centred above the (radius 9) circle.
+                        // Right column: 10px to the right of the node.
+                        .attr("text-anchor", d => d.kind === "focal" ? "middle" : "start")
+                        .attr("dy",          d => d.kind === "focal" ? null     : "0.32em")
+                        .attr("x", d =>
+                            d.kind === "focal" ? dest.get(d.id).x
+                                               : dest.get(d.id).x + 10)
+                        .attr("y", d =>
+                            d.kind === "focal" ? dest.get(d.id).y - 9 - 4
+                                               : dest.get(d.id).y)
+                        .text(d => d.id.replace(/-/g, " "))
+                        .transition().duration(200)
+                        .attr("opacity", 1);
+                }, DURATION);
+            }
+
+            function clearIsolateLabels() {
+                labelG.selectAll("text").remove();
+            }
+
+            function dismiss() {
+                clearTimeout(phaseTimer);
+                phase = "transitioning";
+                clearIsolateLabels();
+
+                node.transition().duration(DURATION)
+                    .attr("cx", n => snapshot.get(n.id).x)
+                    .attr("cy", n => snapshot.get(n.id).y)
+                    .attr("r", 4).attr("fill", "#0072B2").attr("opacity", 1);
+
+                link.transition().duration(DURATION)
+                    .attr("x1", l => snapshot.get(idOf(l.source)).x)
+                    .attr("y1", l => snapshot.get(idOf(l.source)).y)
+                    .attr("x2", l => snapshot.get(idOf(l.target)).x)
+                    .attr("y2", l => snapshot.get(idOf(l.target)).y)
+                    .attr("opacity", 0.5);
+
+                // When the visual restore finishes, sync the simulation data
+                // to the snapshot and gently restart it. alpha 0.15 lets drag,
+                // hover and the force springs work again with a calm layout.
+                phaseTimer = setTimeout(() => {
+                    nodes.forEach(n => {
+                        const s = snapshot.get(n.id);
+                        n.x = s.x; n.y = s.y; n.vx = 0; n.vy = 0;
+                        n.fx = null; n.fy = null;
+                    });
+                    sim.alpha(0.15).restart();
+                    snapshot = null;
+                    phase = "idle";
+                }, DURATION + 20);
+            }
+
+            // Snap every mark back to the snapshot positions without an
+            // animation. Used when the user clicks a node while another
+            // isolation is in progress — we want immediate feedback.
+            function snapToSnapshot() {
+                if (!snapshot) return;
+                node.interrupt(); link.interrupt();
+                clearIsolateLabels();
+                node.attr("cx", n => snapshot.get(n.id).x)
+                    .attr("cy", n => snapshot.get(n.id).y)
+                    .attr("r", 4).attr("fill", "#0072B2").attr("opacity", 1);
+                link.attr("x1", l => snapshot.get(idOf(l.source)).x)
+                    .attr("y1", l => snapshot.get(idOf(l.source)).y)
+                    .attr("x2", l => snapshot.get(idOf(l.target)).x)
+                    .attr("y2", l => snapshot.get(idOf(l.target)).y)
+                    .attr("opacity", 0.5);
+                nodes.forEach(n => {
+                    const s = snapshot.get(n.id);
+                    n.x = s.x; n.y = s.y; n.vx = 0; n.vy = 0;
+                    n.fx = null; n.fy = null;
+                });
+            }
+
+            // Hover label only during the normal layout; isolation has its
+            // own (more elaborate) labelling.
+            node.on("mouseenter", (e, d) => {
+                if (phase !== "idle") return;
+                hoveredNode = d;
+                hoverLabel.text(d.id.replace(/-/g, " "))
+                    .attr("x", d.x).attr("y", d.y - 4 - 4)
+                    .style("opacity", 1);
+            });
+            node.on("mouseleave", () => {
+                hoveredNode = null;
+                hoverLabel.style("opacity", 0);
+            });
+
+            node.on("click", (e, d) => {
+                e.stopPropagation();
+                hoveredNode = null;                        // hide hover label
+                hoverLabel.style("opacity", 0);
+                if (phase !== "idle") snapToSnapshot();   // collapse current state
+                isolate(d);                                // and immediately isolate the new node
+            });
+
+            c.root.on("click", (e) => {
+                if (e.target.tagName !== "svg") return;
+                if (phase === "isolated") dismiss();
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="03-click-pin.html">&larr; Prev: §3 click to pin</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="../11d/01-encoded-view.html">Next: 11d §2 encoded view &rarr;</a>
+    </nav>
+</body>
+
+</html>

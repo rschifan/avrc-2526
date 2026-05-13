@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11b §3 — tuned forces with live sliders</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11b §3 — Tuned forces (live sliders)</h1>
+    <p class="lead">Six sliders, one tick handler. Each input rebuilds the simulation with the new
+        parameters and reheats it — see how each force changes the layout's character.
+        <a href="../../11b-force-layouts.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The default forces are reasonable but not optimal. In practice you parameterise four
+            (or six) and tune them to the data. The pattern: read slider values → stop the old
+            simulation → build a fresh one with the new parameters → call <code>.alpha(0.6)</code>
+            to reheat.</p>
+        <ul>
+            <li><strong>Link distance</strong> — resting length of the spring. Larger = airier
+                layout; smaller = tighter clusters.</li>
+            <li><strong>Charge strength</strong> — pairwise repulsion (negative). More negative
+                spreads the graph out. Range here is [-300, 0]; default is -30.</li>
+            <li><strong>Collide pad</strong> — hard minimum gap between node centres. Stops
+                circles from overlapping. Use a function of <code>r</code> when nodes have
+                different sizes.</li>
+            <li><strong>Alpha decay</strong> — how fast the simulation cools. Higher = settles
+                faster (less wiggle, may freeze before untangling). Lower = runs longer (lets
+                communities migrate, but feels sluggish). Default ≈ 0.0228.</li>
+            <li><strong>forceX / forceY strength</strong> — per-axis pull toward a target. Set
+                both to 0.05 to gently anchor the centre of mass, larger to elongate the layout.</li>
+            <li><strong>Why rebuild on every input</strong>: <code>forceSimulation</code> is
+                stateful. Swapping a single force in place is possible
+                (<code>sim.force("charge", newCharge)</code>), but rebuilding from scratch is
+                simpler and reliably picks up every parameter change.</li>
+        </ul>
+    </div>
+
+    <div id="controls"></div>
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const cloneGraph = () => ({
+                nodes: raw.nodes.map(d => ({ ...d })),
+                links: raw.links.map(d => ({ ...d }))
+            });
+
+            const ctrl = d3.select("#controls").append("div").attr("class", "force-controls");
+            const sliders = [
+                { id: "linkDist", label: "link distance",   min: 5,    max: 100, step: 1,    val: 30 },
+                { id: "charge",   label: "charge strength", min: -300, max: 0,   step: 5,    val: -90 },
+                { id: "collide",  label: "collide pad",     min: 0,    max: 15,  step: 1,    val: 2 },
+                { id: "decay",    label: "alpha decay",     min: 0.005,max: 0.2, step: 0.005,val: 0.03 },
+                { id: "xStr",     label: "forceX strength", min: 0,    max: 0.5, step: 0.01, val: 0.05 },
+                { id: "yStr",     label: "forceY strength", min: 0,    max: 0.5, step: 0.01, val: 0.05 }
+            ];
+            sliders.forEach(s => {
+                const lbl = ctrl.append("label");
+                lbl.append("span").text(s.label);
+                lbl.append("span").attr("class", "val").attr("id", "v-" + s.id).text(s.val);
+                lbl.append("input").attr("type", "range")
+                    .attr("min", s.min).attr("max", s.max).attr("step", s.step)
+                    .attr("value", s.val).attr("id", s.id);
+            });
+
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const { nodes, links } = cloneGraph();
+            nodes.forEach(d => d.__r = 4);
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", 4).attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke");
+
+            let sim;
+            function rebuild() {
+                const v = id => +document.getElementById(id).value;
+                sliders.forEach(s => {
+                    document.getElementById("v-" + s.id).textContent = v(s.id);
+                });
+                if (sim) sim.stop();
+                sim = d3.forceSimulation(nodes)
+                    .force("link",    d3.forceLink(links).id(d => d.id).distance(v("linkDist")))
+                    .force("charge",  d3.forceManyBody().strength(v("charge")))
+                    .force("collide", d3.forceCollide().radius(4 + v("collide")))
+                    .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(v("xStr")))
+                    .force("y", d3.forceY(c.innerH / 2).strength(v("yStr")))
+                    .alpha(0.6)
+                    .alphaDecay(v("decay"))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+            }
+            rebuild();
+            sliders.forEach(s => {
+                document.getElementById(s.id).addEventListener("input", rebuild);
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-basic-simulation.html">&larr; Prev: §1 minimum viable simulation</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="03-pinned-nodes.html">Next: §5 pinned nodes &rarr;</a>
+    </nav>
+</body>
+
+</html>

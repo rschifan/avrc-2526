@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11d §3 — community hulls with d3.polygonHull</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11d §3 — Community hulls</h1>
+    <p class="lead">Colour-by-community gets you most of the way; <em>drawing the community
+        boundary</em> finishes the job. <code>d3.polygonHull</code> returns the convex hull of a
+        set of points; <code>curveCatmullRomClosed</code> turns it into a smooth, closed shape.
+        <a href="../../11d-encoding-and-zoom.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>Per simulation tick: group nodes by community, compute the convex hull of each group,
+            render a smooth closed path coloured to match the community. The hull layer sits
+            <em>below</em> the links and nodes (so marks draw on top), and recomputes every tick
+            so it tracks the layout as it relaxes.</p>
+        <ul>
+            <li><strong><code>d3.group(nodes, d =&gt; d.community)</code></strong> — returns a
+                <code>Map(community → array of nodes)</code>. Same idea as Python's
+                <code>itertools.groupby</code> but doesn't require sorting first.</li>
+            <li><strong><code>d3.polygonHull(points)</code></strong> — Graham scan / Andrew's
+                monotone chain. Takes an array of <code>[x, y]</code> tuples; returns the convex
+                hull as a clockwise array of points. Needs at least 3 points; returns
+                <code>null</code> for collinear inputs — hence the
+                <code>.filter(Boolean)</code> at the end.</li>
+            <li><strong><code>d3.line().curve(d3.curveCatmullRomClosed.alpha(0.7))</code></strong>
+                — the Catmull-Rom curve fits a smooth spline through the hull's vertices and
+                closes it. <code>alpha(0.7)</code> controls how tightly the curve hugs the
+                points: 0 = straight segments, 1 = loose loops. 0.7 is a good middle.</li>
+            <li><strong>Render order matters</strong>:
+                <code>hullG</code> is the <em>first</em> child of <code>wrap</code>, so links and
+                nodes paint on top of the hulls. Without the layering, the translucent fills
+                would obscure the marks they're supposed to highlight.</li>
+            <li><strong>Performance note</strong>: <code>drawHulls()</code> runs every tick — for
+                187 nodes / 9 communities this is fine. For very large graphs, throttle to every
+                Nth tick, or only redraw on <code>"end"</code>.</li>
+            <li><strong>Toggle visibility</strong> — checkbox above the canvas. The hulls
+                <code>display</code> toggles without rebuilding anything: a cheap "show me with
+                vs without" comparison.</li>
+        </ul>
+    </div>
+
+    <p>
+        <label><input type="checkbox" id="hull-toggle" checked> show community hulls</label>
+    </p>
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const hullCurve = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.7));
+
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            const r = d3.scaleSqrt()
+                .domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            nodes.forEach(d => d.__r = r(d.bc));
+
+            const wrap = c.plot.append("g");
+            const hullG = wrap.append("g").attr("class", "hulls");   // below
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => r(d.bc))
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke");
+
+            let hullsOn = true;
+            d3.select("#hull-toggle").on("change", function () {
+                hullsOn = this.checked;
+                hullG.style("display", hullsOn ? null : "none");
+            });
+
+            function drawHulls() {
+                if (!hullsOn) return;
+                const groups = d3.group(nodes, d => d.community);
+                const hulls = [...groups].map(([key, members]) => {
+                    if (members.length < 3) return null;
+                    const pts = members.map(d => [d.x, d.y]);
+                    const hull = d3.polygonHull(pts);
+                    return hull ? { key, points: hull } : null;
+                }).filter(Boolean);
+
+                hullG.selectAll("path").data(hulls, d => d.key)
+                    .join("path")
+                    .attr("d", d => hullCurve(d.points))
+                    .attr("fill", d => colour(d.key))
+                    .attr("fill-opacity", 0.15)
+                    .attr("stroke", d => colour(d.key))
+                    .attr("stroke-width", 1.5)
+                    .attr("stroke-opacity", 0.6)
+                    .attr("vector-effect", "non-scaling-stroke");
+            }
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-110))
+                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    drawHulls();
+                });
+            attachWarmup(c.root, sim);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-encoded-view.html">&larr; Prev: §1-§2 encoded view</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="../11e/01-capstone.html">Next: 11e capstone &rarr;</a>
+    </nav>
+</body>
+
+</html>

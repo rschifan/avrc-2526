@@ -15,6 +15,12 @@
         button { padding: 0.4em 0.9em; font-size: 1em; cursor: pointer; }
         .axis text { font-size: 13px; fill: #555; }
         .axis path, .axis line { stroke: #bbb; }
+            .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
     </style>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -166,5 +172,12 @@
             step(years[0]);
         });
     </script>
+
+    <nav class="example-nav">
+        <a href="05-enter-exit-transitions.html">&larr; Prev: §6 enter/exit transitions</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <span></span>
+    </nav>
 </body>
 </html>

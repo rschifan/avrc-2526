@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11a §3 — fixed circular layout</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11a §3 — Fixed circular layout</h1>
+    <p class="lead">A network is two layers of marks bound to two arrays — once positions are known,
+        the L9/L10 data join produces the picture directly. No layout algorithm needed.
+        <a href="../../11a-networkx-to-d3.html">Source tutorial &rarr;</a>
+    </p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The top 20 characters by betweenness centrality are placed by hand on a circle:
+            <em>x</em> = <code>cx + R · cos(angle)</code>, <em>y</em> = <code>cy + R · sin(angle)</code>.
+            Edges and nodes are then drawn with the same data-join pattern from L9 / L10.
+        </p>
+        <ul>
+            <li><strong>Two joins, two arrays</strong>: <code>graph.links → &lt;line&gt;</code> and
+                <code>graph.nodes → &lt;circle&gt;</code>. That is the entire skeleton of a network
+                visualization — every L11 demo from here on adds capabilities on top.
+            </li>
+            <li><strong>An id-to-node map</strong> (<code>byId = new Map(top.map(d =&gt; [d.id, d]))</code>)
+                lets each link look up its endpoint positions. Links carry string ids; nodes carry
+                positions; the map glues them together.</li>
+            <li><strong>Circular layouts are a hand-coded fallback</strong> — useful for ≤ 30 nodes
+                where you want a stable, scannable arrangement. They scale terribly to hundreds of
+                nodes, which is why §4 motivates force layouts.</li>
+            <li><strong>Subgraph filter</strong>: we only render links whose <em>both</em> endpoints
+                are in the top-20 set. Otherwise you'd see dangling lines pointing into nothing.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(graph => {
+            const top = [...graph.nodes].sort((a, b) => b.bc - a.bc).slice(0, 20);
+            const topIds = new Set(top.map(d => d.id));
+            const subLinks = graph.links.filter(l =>
+                topIds.has(l.source) && topIds.has(l.target));
+
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 30, right: 30, bottom: 30, left: 30 } });
+            const cx = c.innerW / 2, cy = c.innerH / 2;
+            const R = Math.min(cx, cy) - 60;
+            const angle = i => (i / top.length) * 2 * Math.PI - Math.PI / 2;
+            top.forEach((d, i) => {
+                d.x = cx + R * Math.cos(angle(i));
+                d.y = cy + R * Math.sin(angle(i));
+            });
+            const byId = new Map(top.map(d => [d.id, d]));
+
+            c.plot.append("g")
+                .selectAll("line").data(subLinks).join("line")
+                .attr("x1", d => byId.get(d.source).x)
+                .attr("y1", d => byId.get(d.source).y)
+                .attr("x2", d => byId.get(d.target).x)
+                .attr("y2", d => byId.get(d.target).y)
+                .attr("stroke", "#bbb")
+                .attr("stroke-opacity", 0.7);
+
+            c.plot.append("g")
+                .selectAll("circle").data(top).join("circle")
+                .attr("cx", d => d.x).attr("cy", d => d.y)
+                .attr("r", 7)
+                .attr("fill", "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1.5);
+
+            c.plot.append("g")
+                .selectAll("text").data(top).join("text")
+                .attr("x", (d, i) => cx + (R + 14) * Math.cos(angle(i)))
+                .attr("y", (d, i) => cy + (R + 14) * Math.sin(angle(i)))
+                .attr("text-anchor", (d, i) => Math.cos(angle(i)) > 0 ? "start" : "end")
+                .attr("dy", 4)
+                .style("font-size", "12px")
+                .text(d => d.id.replace(/-/g, " "));
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-json-summary.html">&larr; Prev: §2 JSON summary</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="03-random-layout.html">Next: §4 random layout &rarr;</a>
+    </nav>
+</body>
+
+</html>

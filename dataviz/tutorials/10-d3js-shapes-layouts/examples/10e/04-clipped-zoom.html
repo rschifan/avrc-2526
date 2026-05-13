@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>10e §5 — clipped zoomable scatterplot</title>
+    <style>
+        body { max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+            line-height: 1.55; color: #222; font-size: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        h1 { font-size: 1.4em; margin-bottom: 0.3em; }
+        .lead { color: #555; margin-top: 0; }
+        .lead a { color: #0072B2; }
+        svg { width: 100%; height: auto; max-width: 100%; display: block;
+            border: 1px solid #ddd; background: #fafafa; cursor: grab; }
+        svg:active { cursor: grabbing; }
+        .axis text { font-size: 13px; fill: #555; }
+        .axis path, .axis line { stroke: #bbb; }
+        button { padding: 0.35em 0.8em; font-size: 0.95em; cursor: pointer; }
+        .note { background: #f3f6fb; border-left: 4px solid #0072B2;
+            padding: 0.7em 1em; margin: 1em 0; font-size: 14.5px; }
+        .note h3 { margin: 0 0 0.4em 0; font-size: 1.02em; }
+        .note ul { margin: 0.3em 0 0.1em 1.2em; padding: 0; }
+        .note li { margin-bottom: 0.25em; }
+        code { background: #eef2f7; padding: 0 0.25em; border-radius: 2px; }
+        pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px;
+            padding: 0.7em 1em; overflow-x: auto; font-size: 13.5px; line-height: 1.45;
+            margin: 0.8em 0; }
+        .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
+        a { color: #0072B2; }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>10e §5 — Clipped zoomable scatterplot</h1>
+    <p class="lead">The production version. Same rescale-scales handler as §4, plus a
+        <code>clipPath</code> declared in <code>defs</code> and applied to a group that wraps the
+        dots. Anything panned outside the plot rectangle is invisible: the clip is a fixed window,
+        the rescaling moves the data through it. Wheel-zoom, drag, double-click — try every
+        gesture; nothing leaks into the margins.
+        <a href="../../10e-zoom-and-navigation.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The §4 rescale-scales handler stays exactly the same. We add one ingredient on top —
+            a <code>clipPath</code> — and the chart becomes ready to ship: marks no longer leak
+            outside the plot rectangle when the reader pans to an edge.</p>
+    </div>
+
+    <div class="note">
+        <h3>What is <code>clipPath</code>?</h3>
+        <p>A <strong>clip-path</strong> is an SVG element that defines a shape used as a
+            <em>visibility mask</em>: any pixel of a target element that falls <em>inside</em>
+            the shape is rendered, and any pixel <em>outside</em> is hidden. The clipped element
+            still exists in the DOM and still receives hover events on its visible parts — it is
+            only the rendered pixels that get cut away.</p>
+        <p>Three things to remember about it:</p>
+        <ul>
+            <li><strong>Declared inside <code>&lt;defs&gt;</code></strong>. The
+                <code>defs</code> element holds reusable SVG content (clip paths, markers,
+                gradients, patterns) that the browser parses but does not paint until something
+                references it.</li>
+            <li><strong>Referenced by id</strong>. The consumer says
+                <code>clip-path="url(#myclip)"</code>. SVG ids share a global namespace per
+                document, so if a page has multiple charts you <em>must</em> use a unique id per
+                chart — otherwise every <code>url(#clip)</code> resolves to the first one and
+                the other charts look unclipped.</li>
+            <li><strong>Lives in the coordinate system of the element that uses it</strong>.
+                Because we attach the clip-path to a group inside <code>plot</code> (already
+                translated by the margins), the clip rectangle's <code>(0, 0)</code> corner
+                <em>is</em> the top-left of the inner plot area.</li>
+        </ul>
+        <p>The full structure in this example:</p>
+<pre>&lt;svg&gt;
+  &lt;defs&gt;
+    &lt;clipPath id="clip-10e-04"&gt;
+      &lt;rect width="innerW" height="innerH"/&gt;   &lt;!-- the visibility window --&gt;
+    &lt;/clipPath&gt;
+  &lt;/defs&gt;
+  &lt;g transform="translate(margin.left, margin.top)"&gt;     &lt;!-- plot --&gt;
+    &lt;g class="axis"&gt; ... &lt;/g&gt;                            &lt;!-- axes: NOT clipped --&gt;
+    &lt;g clip-path="url(#clip-10e-04)"&gt;                    &lt;!-- dotsG: CLIPPED --&gt;
+      &lt;circle .../&gt; &lt;circle .../&gt; ...
+    &lt;/g&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;</pre>
+    </div>
+
+    <div class="note">
+        <h3>How clipping interacts with zoom</h3>
+        <ul>
+            <li><strong>The clip rectangle is fixed</strong> at <code>innerW × innerH</code>
+                pixels — it does <em>not</em> participate in the zoom transform. Think of it as
+                a window cut into a wall.</li>
+            <li><strong>The rescaled scales move the data through the window.</strong> When the
+                reader pans, <code>cx</code>/<code>cy</code> of each circle changes; circles
+                that would land outside the window simply aren't painted.</li>
+            <li><strong>Only the dots are clipped</strong> — the axis groups deliberately sit
+                outside <code>dotsG</code> so tick marks and labels remain fully visible even
+                when their rendering position coincides with a "hidden" data point.</li>
+            <li><strong>Reset zoom</strong>: the button below calls
+                <code>zoom.transform(svg, d3.zoomIdentity)</code> inside a transition.
+                <code>d3.zoomIdentity</code> is the constant transform with
+                <code>k=1, x=0, y=0</code> — i.e. "no zoom". Routing the reset through the zoom
+                behaviour (instead of mutating attributes directly) keeps D3's internal state in
+                sync, so the next wheel-scroll continues from the reset position rather than
+                jumping back to wherever the user was.</li>
+        </ul>
+    </div>
+
+    <p><button id="reset">Reset zoom</button></p>
+    <div id="demo"></div>
+    <script>
+        // ─────────────────────────────────────────────────────────────────────
+        const PALETTE = {
+            Africa: "#009E73", Americas: "#D55E00", Asia: "#0072B2",
+            Europe: "#CC79A7", Oceania: "#E69F00"
+        };
+        const c = makeCanvas("#demo", 480, {
+            margin: { top: 20, right: 30, bottom: 50, left: 60 }
+        });
+
+        d3.csv("../../datasets/gapminder.csv", d => ({
+            country: d.country, continent: d.continent, year: +d.year,
+            gdpPercap: +d.gdpPercap, lifeExp: +d.lifeExp, pop: +d.pop
+        })).then(raw => {
+            const data = raw.filter(d => d.year === 2007);
+            const x = d3.scaleLog().domain([200, 100000]).range([0, c.innerW]);
+            const y = d3.scaleLinear().domain([35, 85]).range([c.innerH, 0]);
+            const r = d3.scaleSqrt().domain([0, d3.max(data, d => d.pop)]).range([2, 18]);
+
+            const xAxisG = c.plot.append("g").attr("class", "axis")
+                .attr("transform", `translate(0, ${c.innerH})`)
+                .call(d3.axisBottom(x).ticks(6, "~s"));
+            const yAxisG = c.plot.append("g").attr("class", "axis")
+                .call(d3.axisLeft(y));
+
+            // Unique clip-path id — each example/chart needs its own.
+            const clipId = "clip-10e-04";
+            c.root.append("defs").append("clipPath").attr("id", clipId)
+                .append("rect").attr("width", c.innerW).attr("height", c.innerH);
+            const dotsG = c.plot.append("g").attr("clip-path", `url(#${clipId})`);
+
+            const dots = dotsG.selectAll("circle").data(data).join("circle")
+                .attr("cx", d => x(d.gdpPercap))
+                .attr("cy", d => y(d.lifeExp))
+                .attr("r",  d => r(d.pop))
+                .attr("fill", d => PALETTE[d.continent])
+                .attr("opacity", 0.75)
+                .attr("stroke", "white").attr("stroke-width", 1);
+            dots.append("title").text(d => `${d.country}\n${d.lifeExp.toFixed(1)} yr`);
+
+            const zoom = d3.zoom()
+                .scaleExtent([1, 16])
+                .extent([[0, 0], [c.innerW, c.innerH]])
+                .translateExtent([[0, 0], [c.innerW, c.innerH]])
+                .on("zoom", ({ transform }) => {
+                    const zx = transform.rescaleX(x);
+                    const zy = transform.rescaleY(y);
+                    xAxisG.call(d3.axisBottom(zx).ticks(6, "~s"));
+                    yAxisG.call(d3.axisLeft(zy));
+                    dots.attr("cx", d => zx(d.gdpPercap))
+                        .attr("cy", d => zy(d.lifeExp));
+                });
+            c.root.call(zoom);
+
+            document.getElementById("reset").addEventListener("click", () => {
+                c.root.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="03-rescale-scales.html">&larr; Prev: §4 rescale-scales</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <span></span>
+    </nav>
+</body>
+
+</html>

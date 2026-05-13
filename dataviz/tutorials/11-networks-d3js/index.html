@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>DV11 — Networks in D3.js</title>
+    <link rel="stylesheet" href="./_shared/chart.css">
+</head>
+
+<body>
+    <h1>DV11 — Networks in D3.js</h1>
+
+    <h2>What you should already know</h2>
+    <p>This lecture composes pieces from earlier classes:</p>
+    <ul>
+        <li>Graph terminology, communities, centrality (L7 — networks with NetworkX)</li>
+        <li>SVG primitives, the data join, scales (L9)</li>
+        <li>Joins, transitions, and event handling (L10)</li>
+    </ul>
+
+    <h2>Tutorials</h2>
+    <p>Run them in order — each one builds on the previous.</p>
+    <ol>
+        <li><a href="11a-networkx-to-d3.html"><strong>11a — From NetworkX to D3</strong></a><br>
+            The node-link JSON format produced by <code>nx.node_link_data</code>; the GoT co-occurrence
+            dataset; drawing nodes as <code>&lt;circle&gt;</code> and links as <code>&lt;line&gt;</code> at
+            fixed positions; why a layout algorithm is needed once positions aren't given.
+        </li>
+        <li><a href="11b-force-layouts.html"><strong>11b — Force layouts</strong></a><br>
+            <code>d3.forceSimulation</code>; the four standard forces (<code>forceLink</code> ·
+            <code>forceManyBody</code> · <code>forceCollide</code> · <code>forceCenter</code>); the
+            <code>tick</code> handler; <code>alpha</code> / <code>alphaDecay</code>; pinning a node via
+            <code>fx</code> / <code>fy</code>.
+        </li>
+        <li><a href="11c-interactivity.html"><strong>11c — Interactivity: drag, hover, click</strong></a><br>
+            <code>d3.drag</code> with <code>alphaTarget</code> + <code>fx</code> / <code>fy</code>;
+            precomputed neighbour set for hover-to-highlight (with conditional labels);
+            click-to-pin toggle; click-to-isolate animation with a small state machine and
+            position snapshots.
+        </li>
+        <li><a href="11d-encoding-and-zoom.html"><strong>11d — Visual encoding and community
+            overlays</strong></a><br>
+            <code>scaleOrdinal(schemeTableau10)</code> for community colour;
+            <code>scaleSqrt</code> for centrality-by-area; convex-hull community overlays via
+            <code>d3.polygonHull</code> + <code>curveCatmullRomClosed</code>.
+        </li>
+        <li><a href="11e-capstone.html"><strong>11e — Capstone</strong></a><br>
+            Full GoT viewer combining everything: drag, hover-fade, click-pin, semantic zoom, search box,
+            community filter (click legend swatch to solo / toggle communities).
+        </li>
+        <li><a href="11f-progressive-build.html"><strong>11f — Progressive build</strong></a><br>
+            Seven stages, each adding one capability on top of the previous: empty force
+            layout → encoded base → drag &amp; hover → zoom-aware labels →
+            <code>foreignObject</code> styled labels → perf / scale instrumentation →
+            cluster forces. Stages 1–5 are the visible build; stages 6 and 7 answer the
+            production questions the topic-by-topic tutorials skip — how the layout scales
+            and how community structure can emerge from the layout itself.
+        </li>
+        <li><a href="11h-web-workers.html"><strong>11h — Web Worker simulation</strong></a><br>
+            Moving the force simulation off the main thread. The <code>postMessage</code> protocol;
+            <code>Transferable</code> typed arrays (<code>Float32Array.buffer</code>) so per-tick
+            payloads are O(1) instead of O(n); drag-through-messages. The recipe for keeping the
+            UI responsive while a large layout converges.
+        </li>
+    </ol>
+
+    <h2>Setup</h2>
+    <p>The tutorials are plain HTML files and self-contained — every asset they need
+        (<code>_shared/chart.css</code>, <code>_shared/chart.js</code>, <code>datasets/got.json</code>)
+        is inside this folder. Serve them with a local HTTP server:</p>
+    <pre><code>cd 11-networks-d3js
+python -m http.server 8000
+# open http://localhost:8000/</code></pre>
+    <p>D3 is loaded from the CDN (<code>https://d3js.org/d3.v7.min.js</code>); no installation required.</p>
+
+    <p><strong>Navigating each demo.</strong> Every L11 demo has pan and zoom on the SVG
+        stage by default: <em>drag the empty background</em> to move the view (handy for
+        seeing nodes that drifted past the visible area), <em>wheel / pinch</em> to zoom in or
+        out. Node drag still works under pan because every drag behaviour declares the plot
+        <code>&lt;g&gt;</code> as its <code>.container(…)</code>, which makes the pointer
+        coordinates resolve in the post-transform coordinate space.</p>
+
+    <h2>Coverage check (DV11 deck → tutorials)</h2>
+    <table>
+        <thead><tr><th>Concept</th><th>Practiced in</th></tr></thead>
+        <tbody>
+            <tr><td>Node-link JSON via <code>nx.node_link_data</code></td><td>11a</td></tr>
+            <tr><td><code>d3.json</code> + binding to nodes / links</td><td>11a</td></tr>
+            <tr><td><code>d3.forceSimulation</code> and the <code>tick</code> handler</td><td>11b</td></tr>
+            <tr><td>Standard forces: <code>forceLink</code>, <code>forceManyBody</code>,
+                <code>forceCollide</code>, <code>forceCenter</code></td><td>11b</td></tr>
+            <tr><td><code>alpha</code> / <code>alphaDecay</code> / reheating</td><td>11b</td></tr>
+            <tr><td>Pinning with <code>fx</code> / <code>fy</code></td><td>11b, 11c, 11e</td></tr>
+            <tr><td><code>d3.drag</code> on simulated nodes</td><td>11c, 11e</td></tr>
+            <tr><td>Hover-to-highlight via neighbour set</td><td>11c, 11e</td></tr>
+            <tr><td>Click-to-pin toggle</td><td>11c, 11e</td></tr>
+            <tr><td>Click-to-isolate animation (state machine + snapshot)</td><td>11c</td></tr>
+            <tr><td>Categorical colour with <code>scaleOrdinal</code></td><td>11d, 11e</td></tr>
+            <tr><td>Centrality → area with <code>scaleSqrt</code></td><td>11d, 11e</td></tr>
+            <tr><td><code>d3.zoom</code> on a wrapper <code>&lt;g&gt;</code></td><td>11d, 11e</td></tr>
+            <tr><td>Semantic zoom (stroke + label scale)</td><td>11d, 11e</td></tr>
+            <tr><td>Search and community filter UI</td><td>11e</td></tr>
+            <tr><td>Cluster forces (community-aware layout)</td><td>11d, 11f</td></tr>
+            <tr><td>Perf instrumentation (tick budget, idle freeze, FPS)</td><td>11f</td></tr>
+            <tr><td>Web Worker simulation with <code>Transferable</code> buffers</td><td>11h</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Per-demo files for class</h2>
+    <p>The <code>examples/</code> subfolder contains one self-contained HTML file per demo — each
+        with a focused "what this example shows" note and prev / next navigation so a student can
+        walk the lecture end to end. Useful for live in-class demonstrations and for grabbing one
+        pattern in isolation.</p>
+    <table>
+        <thead><tr><th>Tutorial</th><th>Examples</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><a href="11a-networkx-to-d3.html">11a — From NetworkX to D3</a></td>
+                <td>
+                    <a href="examples/11a/01-json-summary.html">JSON summary</a> ·
+                    <a href="examples/11a/02-fixed-circle.html">fixed circular layout</a> ·
+                    <a href="examples/11a/03-random-layout.html">random layout (motivation)</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11b-force-layouts.html">11b — Force layouts</a></td>
+                <td>
+                    <a href="examples/11b/01-basic-simulation.html">minimum viable simulation</a> ·
+                    <a href="examples/11b/02-tuned-forces.html">tuned forces (live sliders)</a> ·
+                    <a href="examples/11b/03-pinned-nodes.html">pinned nodes</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11c-interactivity.html">11c — Interactivity</a></td>
+                <td>
+                    <a href="examples/11c/01-drag.html">drag</a> ·
+                    <a href="examples/11c/02-hover-neighbours.html">hover to highlight neighbours</a> ·
+                    <a href="examples/11c/03-click-pin.html">click to pin / unpin</a> ·
+                    <a href="examples/11c/04-click-isolate.html">click-to-isolate animation</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11d-encoding-and-zoom.html">11d — Encoding and overlays</a></td>
+                <td>
+                    <a href="examples/11d/01-encoded-view.html">colour + size encoding</a> ·
+                    <a href="examples/11d/02-community-hulls.html">community hulls</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11e-capstone.html">11e — Capstone</a></td>
+                <td>
+                    <a href="examples/11e/01-capstone.html">complete GoT viewer</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11f-progressive-build.html">11f — Progressive build</a></td>
+                <td>
+                    <a href="examples/11f/01-empty-force.html">empty force layout</a> ·
+                    <a href="examples/11f/02-encoded-base.html">encoded base</a> ·
+                    <a href="examples/11f/03-drag-and-hover.html">drag and hover</a> ·
+                    <a href="examples/11f/04-zoom-aware-labels.html">zoom-aware labels</a> ·
+                    <a href="examples/11f/05-foreignobject-labels.html">foreignObject labels</a> ·
+                    <a href="examples/11f/06-perf-and-scale.html">perf and scale</a> ·
+                    <a href="examples/11f/07-cluster-forces.html">cluster forces</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="11h-web-workers.html">11h — Web Worker simulation</a></td>
+                <td>
+                    <a href="examples/11h/01-worker-simulation.html">on-thread vs in-worker</a>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://github.com/d3/d3-force" target="_blank">d3-force</a> — every force in
+            <code>d3.forceSimulation</code></li>
+        <li><a href="https://observablehq.com/@d3/force-directed-graph" target="_blank">D3 force-directed
+            graph (Observable)</a></li>
+        <li><a href="https://github.com/d3/d3-zoom" target="_blank">d3-zoom</a> — the zoom behaviour</li>
+        <li><a href="https://networkx.org/documentation/stable/reference/readwrite/json_graph.html"
+                target="_blank">NetworkX <code>json_graph</code></a> — produces the JSON D3 expects</li>
+    </ul>
+</body>
+
+</html>

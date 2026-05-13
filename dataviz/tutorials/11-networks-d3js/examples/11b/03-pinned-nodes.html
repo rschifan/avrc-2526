@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11b §5 — pinning nodes with fx / fy</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11b §5 — Pinning nodes with <code>fx</code> / <code>fy</code></h1>
+    <p class="lead">A node with <code>fx</code>, <code>fy</code> set is fixed: it does not move
+        under any force, and other nodes arrange around it. Setting them back to <code>null</code>
+        releases the node. This same mechanism powers drag (next tutorial).
+        <a href="../../11b-force-layouts.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>Three high-centrality characters are anchored at fixed positions (top centre, lower
+            left, lower right). The rest of the network re-equilibrates around them. Toggle the
+            pins off and the simulation re-runs without anchors — community structure rearranges.</p>
+        <ul>
+            <li><strong>Two special properties</strong>: each node datum can carry
+                <code>fx</code> (forced x) and <code>fy</code> (forced y). When set, the simulation
+                overwrites <code>d.x</code> with <code>d.fx</code> at the end of every tick. The
+                node still <em>exists</em> in the simulation and still influences neighbours via
+                <code>forceLink</code> and <code>forceManyBody</code>; it just doesn't get pushed
+                around.</li>
+            <li><strong>The release</strong>: <code>d.fx = null; d.fy = null;</code> — the
+                simulation stops overriding the position and the node becomes free again.</li>
+            <li><strong>Why reheat after toggling</strong>: <code>sim.alpha(0.5).restart()</code>
+                bumps the temperature back up so the layout can adapt to the new constraints.
+                Without it, alpha has decayed to ~0 and the simulation won't move anything.</li>
+            <li><strong>This is the foundation for drag</strong>: 11c will wire a pointer's
+                <code>(event.x, event.y)</code> to a node's <code>fx</code> / <code>fy</code>,
+                pinning it as long as the mouse is down, then releasing on
+                <code>mouseup</code>.</li>
+            <li><strong>Use case beyond toy demos</strong>: anchor known entities (a focal user,
+                a known cluster head, a fixed origin) and let the rest of the graph arrange in
+                relation to them — useful for comparing layouts across snapshots.</li>
+        </ul>
+    </div>
+
+    <p><button id="toggle">Toggle pins on / off</button></p>
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            nodes.forEach(d => d.__r = 5);
+            const cx = c.innerW / 2, cy = c.innerH / 2;
+
+            const top3 = [...nodes].sort((a, b) => b.bc - a.bc).slice(0, 3);
+            const pinTargets = [
+                { id: top3[0].id, fx: cx,       fy: cy - 130 },
+                { id: top3[1].id, fx: cx - 160, fy: cy + 100 },
+                { id: top3[2].id, fx: cx + 160, fy: cy + 100 }
+            ];
+
+            const wrap = c.plot.append("g");
+            const link = wrap.append("g")
+                .attr("stroke", "#bbb").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line")
+                .attr("vector-effect", "non-scaling-stroke");
+            const node = wrap.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => pinTargets.some(p => p.id === d.id) ? 8 : 4)
+                .attr("fill", d => pinTargets.some(p => p.id === d.id) ? "#D55E00" : "#0072B2")
+                .attr("stroke", "white").attr("stroke-width", 1)
+                .attr("vector-effect", "non-scaling-stroke");
+            node.append("title")
+                .text(d => pinTargets.some(p => p.id === d.id)
+                    ? `${d.id.replace(/-/g, " ")} (pinned)` : d.id.replace(/-/g, " "));
+
+            let pinsOn = true;
+            function applyPins() {
+                nodes.forEach(d => { d.fx = null; d.fy = null; });
+                if (pinsOn) {
+                    pinTargets.forEach(p => {
+                        const n = nodes.find(d => d.id === p.id);
+                        if (n) { n.fx = p.fx; n.fy = p.fy; }
+                    });
+                }
+            }
+            applyPins();
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge",  d3.forceManyBody().strength(-90))
+                .force("collide", d3.forceCollide().radius(6))
+                .force("center",  d3.forceCenter(cx, cy))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+            document.getElementById("toggle").addEventListener("click", () => {
+                pinsOn = !pinsOn;
+                applyPins();
+                sim.alpha(0.5).restart();
+            });
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="02-tuned-forces.html">&larr; Prev: §3 tuned forces</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="../11c/01-drag.html">Next: 11c §1 drag &rarr;</a>
+    </nav>
+</body>
+
+</html>

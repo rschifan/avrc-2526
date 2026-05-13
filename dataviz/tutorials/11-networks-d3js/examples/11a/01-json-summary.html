@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11a §2 — node-link JSON summary</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+
+<body>
+    <h1>11a §2 — Node-link JSON summary</h1>
+    <p class="lead">Load the Game-of-Thrones graph and inspect what
+        <code>d3.json</code> hands back. No drawing yet — just the two arrays.
+        <a href="../../11a-networkx-to-d3.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The interchange between NetworkX and D3 is a single JSON document with two arrays:
+            <code>nodes</code> and <code>links</code>. NetworkX writes it via
+            <code>nx.node_link_data(G)</code>, D3 reads it via <code>d3.json(url)</code>.
+            Every other example in L11 starts from this same file — <code>datasets/got.json</code>.</p>
+        <ul>
+            <li><strong>Each node</strong> has an <code>id</code> (any string), plus any number of
+                attributes. Here: <code>community</code> (Louvain label, integer) and
+                <code>bc</code> (betweenness centrality, float in [0, 1]).</li>
+            <li><strong>Each link</strong> points to two node ids via <code>source</code> and
+                <code>target</code>, and can carry attributes (here, a co-occurrence
+                <code>weight</code>).</li>
+            <li><strong><code>d3.json</code> returns a Promise</strong>. The graph object is delivered
+                inside <code>.then(graph =&gt; …)</code>. No special parser, no schema validation —
+                whatever NetworkX wrote becomes a plain JS object.</li>
+            <li><strong>Note: <code>source</code> / <code>target</code> are strings <em>now</em></strong>.
+                Once you pass the links to <code>d3.forceLink</code> (11b), D3 rewrites each one in
+                place with the actual node object. The <code>l.source.id ?? l.source</code> idiom
+                handles both states.</li>
+        </ul>
+    </div>
+
+    <div id="summary"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(graph => {
+            const wrap = d3.select("#summary");
+            const table = wrap.append("table")
+                .style("border-collapse", "collapse")
+                .style("margin", "1em 0")
+                .style("font-size", "14.5px");
+            const rows = [
+                ["nodes (count)", graph.nodes.length],
+                ["links (count)", graph.links.length],
+                ["sample node",   JSON.stringify(graph.nodes[0])],
+                ["sample link",   JSON.stringify(graph.links[0])]
+            ];
+            const tbody = table.append("tbody");
+
+            const tr = tbody.selectAll("tr")
+                .data(rows)
+                .join("tr");
+
+            tr.selectAll("td")
+                .data(d => d)
+                .join("td")
+                .style("padding", "0.4em 0.8em")
+                .style("border", "1px solid #ddd")
+                .style("font-family", (d, i) => i ? "ui-monospace, monospace" : null)
+                .text(d => d);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <span></span>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="02-fixed-circle.html">Next: §3 fixed circular layout &rarr;</a>
+    </nav>
+</body>
+
+</html>

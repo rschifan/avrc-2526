@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>10e §3 — naïve group transform</title>
+    <style>
+        body { max-width: 1100px; margin: 2em auto; padding: 0 1.5em;
+            line-height: 1.55; color: #222; font-size: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        h1 { font-size: 1.4em; margin-bottom: 0.3em; }
+        .lead { color: #555; margin-top: 0; }
+        .lead a { color: #0072B2; }
+        svg { width: 100%; height: auto; max-width: 100%; display: block;
+            border: 1px solid #ddd; background: #fafafa; cursor: grab; }
+        svg:active { cursor: grabbing; }
+        .axis text { font-size: 13px; fill: #555; }
+        .axis path, .axis line { stroke: #bbb; }
+        .warn { background: #fff4e5; border-left: 4px solid #E69F00;
+            padding: 0.6em 0.9em; margin: 1em 0; font-size: 14px; }
+        .note { background: #f3f6fb; border-left: 4px solid #0072B2;
+            padding: 0.7em 1em; margin: 1em 0; font-size: 14.5px; }
+        .note h3 { margin: 0 0 0.4em 0; font-size: 1.02em; }
+        .note ul { margin: 0.3em 0 0.1em 1.2em; padding: 0; }
+        .note li { margin-bottom: 0.25em; }
+        code { background: #eef2f7; padding: 0 0.25em; border-radius: 2px; }
+        .example-nav { margin-top: 2em; padding-top: 1em; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 14px; gap: 1em; }
+        .example-nav .spacer { flex: 1; }
+        .example-nav a { text-decoration: none; }
+        .example-nav a:hover { text-decoration: underline; }
+        a { color: #0072B2; }
+    </style>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>10e §3 — Naïve zoom: transform a wrapping <code>&lt;g&gt;</code></h1>
+    <p class="lead">Wrap the dots in a group and write the zoom transform onto it. Wheel zooms,
+        drag pans, double-click zooms in — but the axes live outside the wrapper, so as you zoom
+        in the dots drift away from the tick labels. This is the wrong pattern for any chart with
+        axes; the next example fixes it.
+        <a href="../../10e-zoom-and-navigation.html">Source tutorial &rarr;</a></p>
+
+    <div class="warn">Try wheel-zooming or dragging. Notice the axis numbers stay put while the
+        dots scale away from them — the labels no longer describe the data underneath.</div>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The simplest way to wire up <code>d3.zoom</code>: attach the behaviour to the SVG,
+            and on every zoom event write the resulting transform onto a wrapper group that
+            contains the marks. SVG composes the parent's <code>transform</code> attribute with
+            its descendants, so the whole subtree scales and translates as one rigid object.</p>
+        <ul>
+            <li><strong><code>d3.zoom()</code></strong> is a <em>behaviour object</em>. You
+                configure it (<code>scaleExtent</code>, <code>extent</code>,
+                <code>translateExtent</code>) and then attach it with
+                <code>selection.call(zoom)</code>. The behaviour silently installs wheel, drag,
+                double-click and pinch listeners on that element.</li>
+            <li><strong>The <code>"zoom"</code> event's <code>transform</code></strong> is an
+                object with three numbers: <code>k</code> (scale factor, ≥ 1 here),
+                <code>x</code> and <code>y</code> (pixel translations). Its
+                <code>toString()</code> produces a valid SVG transform string like
+                <code>translate(120, 80) scale(2.5)</code>, so assigning it to the
+                <code>transform</code> attribute applies it directly.</li>
+            <li><strong>Why this is "naïve"</strong>: the axes were appended to <code>plot</code>,
+                <em>not</em> inside the wrapper group, so they never receive the transform.
+                Dot positions move; tick labels stay still. After any zoom the tick labels stop
+                describing the data underneath — fatal for any chart with a quantitative axis.</li>
+            <li><strong>Side-effect on radius</strong>: because the whole group is scaled by
+                <code>k</code>, the dots' <code>r</code> attribute is visually multiplied too.
+                Zoom in 16× and a 5-pixel dot becomes 80 pixels wide. Sometimes desirable
+                (treemaps, networks); usually not what you want for scatter.</li>
+            <li><strong>Pattern still useful for</strong> diagrams without axes — force-directed
+                graphs, treemaps, chord diagrams. That is exactly how L11 and L12 use it.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+    <script>
+        // ─────────────────────────────────────────────────────────────────────
+        const PALETTE = {
+            Africa: "#009E73", Americas: "#D55E00", Asia: "#0072B2",
+            Europe: "#CC79A7", Oceania: "#E69F00"
+        };
+        const c = makeCanvas("#demo", 420, {
+            margin: { top: 20, right: 30, bottom: 50, left: 60 }
+        });
+
+        d3.csv("../../datasets/gapminder.csv", d => ({
+            country: d.country, continent: d.continent, year: +d.year,
+            gdpPercap: +d.gdpPercap, lifeExp: +d.lifeExp, pop: +d.pop
+        })).then(raw => {
+            const data = raw.filter(d => d.year === 2007);
+            const x = d3.scaleLog().domain([200, 100000]).range([0, c.innerW]);
+            const y = d3.scaleLinear().domain([35, 85]).range([c.innerH, 0]);
+            const r = d3.scaleSqrt().domain([0, d3.max(data, d => d.pop)]).range([2, 18]);
+
+            c.plot.append("g").attr("class", "axis")
+                .attr("transform", `translate(0, ${c.innerH})`)
+                .call(d3.axisBottom(x).ticks(6, "~s"));
+            c.plot.append("g").attr("class", "axis")
+                .call(d3.axisLeft(y));
+
+            // The wrapper group — everything inside it gets the zoom transform.
+            const zoomG = c.plot.append("g");
+            zoomG.selectAll("circle").data(data).join("circle")
+                .attr("cx", d => x(d.gdpPercap))
+                .attr("cy", d => y(d.lifeExp))
+                .attr("r",  d => r(d.pop))
+                .attr("fill", d => PALETTE[d.continent])
+                .attr("opacity", 0.75)
+                .attr("stroke", "white").attr("stroke-width", 1)
+              .append("title").text(d => `${d.country}\n${d.lifeExp.toFixed(1)} yr`);
+
+            const zoom = d3.zoom()
+                .scaleExtent([1, 16])
+                .extent([[0, 0], [c.innerW, c.innerH]])
+                .translateExtent([[0, 0], [c.innerW, c.innerH]])
+                .on("zoom", ({ transform }) => {
+                    zoomG.attr("transform", transform);
+                });
+            c.root.call(zoom);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-static-baseline.html">&larr; Prev: §2 static baseline</a>
+        <a href="../../index.html">L10 index</a>
+        <span class="spacer"></span>
+        <a href="03-rescale-scales.html">Next: §4 rescale-scales &rarr;</a>
+    </nav>
+</body>
+
+</html>

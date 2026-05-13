@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11f — Stage 4: zoom-aware labels</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>11f — Stage 4: Zoom-aware labels</h1>
+    <p class="lead"><code>d3.zoom</code> on a wrapping <code>&lt;g&gt;</code>, with
+        <strong>zoom-invariant sizing</strong>: every visual size attribute divides by
+        <code>k</code> so strokes, radii and labels stay constant in screen pixels. Labels reveal
+        only at <code>k ≥ 1.5</code>.
+        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+    </p>
+
+    <div class="note">
+        <h3>What this stage adds (vs the previous stage)</h3>
+        <p>One ingredient: a zoom behaviour and a clever rewrite of all visual sizes on every
+            event. The result feels like "the chart zooms but the marks don't" — typography
+            stays legible, dots stay readable, edges stay thin. This is the same pattern as
+            10e's group-transform zoom, with the extra step of counter-scaling every size
+            attribute so it looks crisp at every zoom level.</p>
+        <ul>
+            <li><strong>Wrapper-group transform</strong>:
+                <code>zoomG.attr("transform", event.transform)</code>. SVG composes this with all
+                descendants — every line and circle moves and scales as one. Borrowed straight
+                from 10e §3.
+            </li>
+            <li><strong>The <code>inv = 1 / k</code> trick</strong>: with a 2× group scale, a
+                normally 4-pixel circle becomes 8 pixels wide. Multiplying its <code>r</code>
+                attribute by <code>inv = 0.5</code> brings it back to 4 — visually constant
+                across zoom levels. Same trick for stroke widths and font sizes.</li>
+            <li><strong>Why not <code>vector-effect: non-scaling-stroke</code></strong>: that
+                attribute only handles strokes, not radii or label sizes. The
+                <code>1 / k</code> rewrite covers all three uniformly.
+            </li>
+            <li><strong>Label threshold</strong>: <code>(k &gt;= 1.5 || topLabelled.has(d.id))</code>.
+                At low zoom, only the 12 most-central characters are labelled (a curated set);
+                zoom in and everyone gets a label. Same idea as semantic zoom in cartography:
+                more detail emerges as you get closer.</li>
+            <li><strong>No fit-to-canvas</strong> here: user zoom would fight the auto-fit
+                transform. Instead we add <code>boundaryForce</code> to keep nodes inside the
+                canvas during simulation. Pick one or the other — they don't compose.</li>
+            <li><strong>Wheel to zoom, drag to pan</strong>. <code>scaleExtent([0.3, 8])</code>
+                lets the user zoom out to 30% and in to 8×.</li>
+        </ul>
+    </div>
+
+    <div id="demo"></div>
+
+    <script>
+        d3.json("../../datasets/got.json").then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const c = makeCanvas("#demo", 600,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const nodes = raw.nodes.map(d => ({ ...d }));
+            const links = raw.links.map(d => ({ ...d }));
+            const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            nodes.forEach(d => d.__r = r(d.bc));
+            const topLabelled = new Set(
+                [...nodes].sort((a, b) => b.bc - a.bc).slice(0, 12).map(d => d.id));
+
+            const zoomG = c.plot.append("g");
+            const link = zoomG.append("g")
+                .attr("stroke", "#999").attr("stroke-opacity", 0.5)
+                .selectAll("line").data(links).join("line");
+            const node = zoomG.append("g")
+                .selectAll("circle").data(nodes).join("circle")
+                .attr("r", d => r(d.bc))
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 1);
+            const label = zoomG.append("g")
+                .selectAll("text").data(nodes).join("text")
+                .attr("text-anchor", "middle").attr("dy", d => -(r(d.bc) + 4))
+                .style("font-size", "12px").style("pointer-events", "none")
+                .style("paint-order", "stroke")
+                .style("stroke", "white").style("stroke-width", 3)
+                .style("fill", "#222")
+                .text(d => d.id.replace(/-/g, " "));
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                .force("charge", d3.forceManyBody().strength(-110))
+                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    label.attr("x", d => d.x).attr("y", d => d.y);
+                });
+            attachWarmup(c.root, sim);
+
+            const zoom = d3.zoom().scaleExtent([0.3, 8])
+                .on("zoom", event => {
+                    const k = event.transform.k, inv = 1 / k;
+                    zoomG.attr("transform", event.transform);
+                    node.attr("r", d => r(d.bc) * inv).attr("stroke-width", inv);
+                    link.attr("stroke-width", inv);
+                    label.style("display", d =>
+                        (k >= 1.5 || topLabelled.has(d.id)) ? null : "none")
+                        .style("font-size", `${12 * inv}px`)
+                        .style("stroke-width", 3 * inv);
+                });
+            c.root.call(zoom);
+
+            // initial state: only the top-labelled set visible
+            label.style("display", d => topLabelled.has(d.id) ? null : "none");
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="03-drag-and-hover.html">&larr; Prev: drag and hover</a>
+        <a href="../../index.html">L11 index</a>
+        <span class="spacer"></span>
+        <a href="05-foreignobject-labels.html">Next: stage 5 — styled label boxes &rarr;</a>
+    </nav>
+</body>
+
+</html>
