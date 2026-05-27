@@ -41,26 +41,28 @@
         <li><a href="11d-encoding-and-zoom.html"><strong>11d — Visual encoding and community
             overlays</strong></a><br>
             <code>scaleOrdinal(schemeTableau10)</code> for community colour;
-            <code>scaleSqrt</code> for centrality-by-area; convex-hull community overlays via
-            <code>d3.polygonHull</code> + <code>curveCatmullRomClosed</code>.
+            <code>scaleSqrt</code> for centrality-by-area; <strong>cluster forces</strong>
+            (per-community <code>forceX</code> / <code>forceY</code>) to make communities emerge
+            from the layout; convex-hull community overlays via <code>d3.polygonHull</code> +
+            <code>curveCatmullRomClosed</code>.
         </li>
-        <li><a href="11e-capstone.html"><strong>11e — Capstone</strong></a><br>
-            Full GoT viewer combining everything: drag, hover-fade, click-pin, semantic zoom, search box,
-            community filter (click legend swatch to solo / toggle communities).
+        <li><a href="11e-rendering-and-scale.html"><strong>11e — Rendering and scale</strong></a><br>
+            The fit-and-finish layer on top of an interactive encoded graph:
+            <strong>semantic zoom</strong> (zoom-invariant sizing + zoom-gated labels);
+            <code>foreignObject</code> styled labels; and the performance levers (tick budget,
+            idle freeze) that stretch how far plain SVG scales.
         </li>
-        <li><a href="11f-progressive-build.html"><strong>11f — Progressive build</strong></a><br>
-            Seven stages, each adding one capability on top of the previous: empty force
-            layout → encoded base → drag &amp; hover → zoom-aware labels →
-            <code>foreignObject</code> styled labels → perf / scale instrumentation →
-            cluster forces. Stages 1–5 are the visible build; stages 6 and 7 answer the
-            production questions the topic-by-topic tutorials skip — how the layout scales
-            and how community structure can emerge from the layout itself.
-        </li>
-        <li><a href="11h-web-workers.html"><strong>11h — Web Worker simulation</strong></a><br>
+        <li><a href="11f-web-workers.html"><strong>11f — Web Worker simulation</strong></a><br>
             Moving the force simulation off the main thread. The <code>postMessage</code> protocol;
             <code>Transferable</code> typed arrays (<code>Float32Array.buffer</code>) so per-tick
-            payloads are O(1) instead of O(n); drag-through-messages. The recipe for keeping the
-            UI responsive while a large layout converges.
+            payloads are O(1) instead of O(n); a responsiveness probe that shows the real payoff —
+            a main thread that stays free while a large layout converges.
+        </li>
+        <li><a href="11g-capstone.html"><strong>11g — Capstone</strong></a><br>
+            Full GoT viewer combining everything from 11a–11e: drag, hover-fade, click-pin,
+            shift-click isolate, semantic zoom, search box, community filter (click a legend swatch
+            to solo / toggle communities), and community hulls. The synthesis demo — read its source
+            as a checklist of every pattern in the lecture.
         </li>
     </ol>
 
@@ -90,19 +92,21 @@ python -m http.server 8000
             <tr><td>Standard forces: <code>forceLink</code>, <code>forceManyBody</code>,
                 <code>forceCollide</code>, <code>forceCenter</code></td><td>11b</td></tr>
             <tr><td><code>alpha</code> / <code>alphaDecay</code> / reheating</td><td>11b</td></tr>
-            <tr><td>Pinning with <code>fx</code> / <code>fy</code></td><td>11b, 11c, 11e</td></tr>
-            <tr><td><code>d3.drag</code> on simulated nodes</td><td>11c, 11e</td></tr>
-            <tr><td>Hover-to-highlight via neighbour set</td><td>11c, 11e</td></tr>
-            <tr><td>Click-to-pin toggle</td><td>11c, 11e</td></tr>
-            <tr><td>Click-to-isolate animation (state machine + snapshot)</td><td>11c</td></tr>
-            <tr><td>Categorical colour with <code>scaleOrdinal</code></td><td>11d, 11e</td></tr>
-            <tr><td>Centrality → area with <code>scaleSqrt</code></td><td>11d, 11e</td></tr>
-            <tr><td><code>d3.zoom</code> on a wrapper <code>&lt;g&gt;</code></td><td>11d, 11e</td></tr>
-            <tr><td>Semantic zoom (stroke + label scale)</td><td>11d, 11e</td></tr>
-            <tr><td>Search and community filter UI</td><td>11e</td></tr>
-            <tr><td>Cluster forces (community-aware layout)</td><td>11d, 11f</td></tr>
-            <tr><td>Perf instrumentation (tick budget, idle freeze, FPS)</td><td>11f</td></tr>
-            <tr><td>Web Worker simulation with <code>Transferable</code> buffers</td><td>11h</td></tr>
+            <tr><td>Pinning with <code>fx</code> / <code>fy</code></td><td>11b, 11c, 11g</td></tr>
+            <tr><td><code>d3.drag</code> on simulated nodes</td><td>11c, 11g</td></tr>
+            <tr><td>Hover-to-highlight via neighbour set</td><td>11c, 11g</td></tr>
+            <tr><td>Click-to-pin toggle</td><td>11c, 11g</td></tr>
+            <tr><td>Click-to-isolate animation (state machine + snapshot)</td><td>11c, 11g</td></tr>
+            <tr><td>Categorical colour with <code>scaleOrdinal</code></td><td>11d, 11g</td></tr>
+            <tr><td>Centrality → area with <code>scaleSqrt</code></td><td>11d, 11g</td></tr>
+            <tr><td>Cluster forces (community-aware layout)</td><td>11d</td></tr>
+            <tr><td>Convex-hull community overlays</td><td>11d, 11g</td></tr>
+            <tr><td><code>d3.zoom</code> on a wrapper <code>&lt;g&gt;</code></td><td>11e, 11g</td></tr>
+            <tr><td>Semantic zoom (stroke + label scale)</td><td>11e, 11g</td></tr>
+            <tr><td><code>foreignObject</code> styled labels</td><td>11e</td></tr>
+            <tr><td>Perf instrumentation (tick budget, idle freeze, FPS)</td><td>11e</td></tr>
+            <tr><td>Search and community filter UI</td><td>11g</td></tr>
+            <tr><td>Web Worker simulation with <code>Transferable</code> buffers</td><td>11f</td></tr>
         </tbody>
     </table>
 
@@ -143,31 +147,28 @@ python -m http.server 8000
                 <td><a href="11d-encoding-and-zoom.html">11d — Encoding and overlays</a></td>
                 <td>
                     <a href="examples/11d/01-encoded-view.html">colour + size encoding</a> ·
-                    <a href="examples/11d/02-community-hulls.html">community hulls</a>
+                    <a href="examples/11d/02-cluster-forces.html">cluster forces</a> ·
+                    <a href="examples/11d/03-community-hulls.html">community hulls</a>
                 </td>
             </tr>
             <tr>
-                <td><a href="11e-capstone.html">11e — Capstone</a></td>
+                <td><a href="11e-rendering-and-scale.html">11e — Rendering and scale</a></td>
                 <td>
-                    <a href="examples/11e/01-capstone.html">complete GoT viewer</a>
+                    <a href="examples/11e/01-zoom-aware-labels.html">semantic zoom</a> ·
+                    <a href="examples/11e/02-foreignobject-labels.html">foreignObject labels</a> ·
+                    <a href="examples/11e/03-perf-and-scale.html">perf and scale</a>
                 </td>
             </tr>
             <tr>
-                <td><a href="11f-progressive-build.html">11f — Progressive build</a></td>
+                <td><a href="11f-web-workers.html">11f — Web Worker simulation</a></td>
                 <td>
-                    <a href="examples/11f/01-empty-force.html">empty force layout</a> ·
-                    <a href="examples/11f/02-encoded-base.html">encoded base</a> ·
-                    <a href="examples/11f/03-drag-and-hover.html">drag and hover</a> ·
-                    <a href="examples/11f/04-zoom-aware-labels.html">zoom-aware labels</a> ·
-                    <a href="examples/11f/05-foreignobject-labels.html">foreignObject labels</a> ·
-                    <a href="examples/11f/06-perf-and-scale.html">perf and scale</a> ·
-                    <a href="examples/11f/07-cluster-forces.html">cluster forces</a>
+                    <a href="examples/11f/01-worker-simulation.html">on-thread vs in-worker</a>
                 </td>
             </tr>
             <tr>
-                <td><a href="11h-web-workers.html">11h — Web Worker simulation</a></td>
+                <td><a href="11g-capstone.html">11g — Capstone</a></td>
                 <td>
-                    <a href="examples/11h/01-worker-simulation.html">on-thread vs in-worker</a>
+                    <a href="examples/11g/01-capstone.html">complete GoT viewer</a>
                 </td>
             </tr>
         </tbody>

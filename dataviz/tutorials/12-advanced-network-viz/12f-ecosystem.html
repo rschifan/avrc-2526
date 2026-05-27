@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12f — Beyond D3: the network viz ecosystem</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+</head>
+
+<body>
+    <h1>12f — Beyond D3: the network visualization ecosystem</h1>
+    <p class="lead">L11 and L12 have shown how far you can take a network in pure D3:
+        force layouts up to ~2k nodes in SVG, with perf instrumentation (11e) and a Web Worker
+        (11f) to push further, and a Canvas renderer for ~10k–20k, plus
+        alternative layouts (matrix, chord, sankey, bundling) when the node-link view fails.
+        Past that point, you reach for specialised tools. This tutorial maps the
+        ecosystem — which library to pick when D3 stops being the right answer.</p>
+
+    <h2>1. The decision tree</h2>
+    <p>The three questions that drive the choice:</p>
+    <ol>
+        <li><strong>How big is the graph?</strong> Order of magnitude — 100, 1k, 10k, 100k, 1M+
+            nodes. Each ceiling pushes you up a tier.</li>
+        <li><strong>Do you need network analysis or just rendering?</strong> Pure rendering
+            tools draw a graph fast; "graph platforms" also run centrality, community
+            detection, shortest paths in the same library.</li>
+        <li><strong>How custom does the visual encoding need to be?</strong> D3 is the most
+            flexible (paint anything onto SVG / Canvas); higher-level libraries make the common
+            case easy at the cost of customisation.</li>
+    </ol>
+
+    <h2>2. The libraries</h2>
+    <table>
+        <thead><tr>
+            <th>Library</th>
+            <th>Renderer</th>
+            <th>Realistic ceiling</th>
+            <th>Built-in analysis</th>
+            <th>Sweet spot</th>
+        </tr></thead>
+        <tbody>
+            <tr>
+                <td><strong>d3-force (this course)</strong></td>
+                <td>SVG / Canvas</td>
+                <td>~10k nodes (Canvas + 11f Worker)</td>
+                <td>None — pair with networkx server-side</td>
+                <td>Custom-encoded network visualisations, full visual control.</td>
+            </tr>
+            <tr>
+                <td><a href="https://js.cytoscape.org/" target="_blank">Cytoscape.js</a></td>
+                <td>Canvas (default) / WebGL</td>
+                <td>~50k nodes interactive</td>
+                <td>Graph theory algorithms, layouts, selectors</td>
+                <td>Domain apps that need a "graph database UI": bioinformatics,
+                    infrastructure maps, BPMN. Stylesheet-driven (CSS-like syntax for graph
+                    elements).</td>
+            </tr>
+            <tr>
+                <td><a href="https://www.sigmajs.org/" target="_blank">sigma.js</a> +
+                    <a href="https://graphology.github.io/" target="_blank">Graphology</a></td>
+                <td>WebGL</td>
+                <td>~100k nodes interactive</td>
+                <td>Algorithms via Graphology (separate library)</td>
+                <td>Large-scale network browsers — Gephi's web cousin. Sharp separation
+                    between "the graph data structure" (Graphology) and "the renderer" (sigma).</td>
+            </tr>
+            <tr>
+                <td><a href="https://cosmograph.app/" target="_blank">Cosmograph</a></td>
+                <td>WebGL (GPU force layout)</td>
+                <td>1M+ nodes</td>
+                <td>None — pure renderer</td>
+                <td>"I have a million nodes, I need to look at them now." Force layout runs on
+                    the GPU; everything stays interactive.</td>
+            </tr>
+            <tr>
+                <td><a href="https://gephi.org/" target="_blank">Gephi</a> (desktop)</td>
+                <td>OpenGL desktop app</td>
+                <td>~500k nodes</td>
+                <td>Full suite — modularity, ForceAtlas2, statistics</td>
+                <td>Exploratory analysis in a notebook-style desktop GUI. Export → publication
+                    or screenshot, not embed-in-page.</td>
+            </tr>
+            <tr>
+                <td><a href="https://github.com/visjs/vis-network" target="_blank">vis-network</a></td>
+                <td>Canvas</td>
+                <td>~5k nodes</td>
+                <td>Minimal</td>
+                <td>Quick demos and dashboards — declarative options-object API, less
+                    flexible than D3 but ~10 lines to working chart.</td>
+            </tr>
+            <tr>
+                <td><a href="https://pyvis.readthedocs.io/" target="_blank">PyVis</a></td>
+                <td>HTML wrapper over vis-network</td>
+                <td>~5k nodes</td>
+                <td>NetworkX integration</td>
+                <td>"I have a NetworkX graph in a Jupyter notebook and I want to look at it
+                    interactively right now."</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>3. Concrete recommendations</h2>
+    <ul>
+        <li><strong>You are in this course's regime</strong> (≤ 10k nodes, custom encoding,
+            embedded in a web page): D3, with the L11 patterns.</li>
+        <li><strong>You inherited a NetworkX graph and want to inspect it</strong>: PyVis is
+            three lines (<code>nt = Network(); nt.from_nx(G); nt.show("g.html")</code>).
+            Acceptable for ≤ 1k nodes; quality drops fast above that.</li>
+        <li><strong>You're building a domain product with a graph as the central
+            object</strong> (citation manager, knowledge base, BPMN editor): Cytoscape.js.
+            The stylesheet API and the built-in algorithms save weeks of work.</li>
+        <li><strong>You're shipping an explorer for 50–500k nodes</strong>: sigma.js +
+            Graphology. The Gephi-style "load a big network, navigate it" pattern.</li>
+        <li><strong>You have a million-node graph and need it real-time</strong>: Cosmograph.
+            The only realistic option short of writing your own WebGL renderer.</li>
+        <li><strong>You're doing one-off exploratory analysis, no web embed needed</strong>:
+            Gephi. Still the best desktop tool for "let me poke at this graph".</li>
+    </ul>
+
+    <h2>4. The Graphology / sigma split</h2>
+    <p>Worth its own section. <a href="https://graphology.github.io/" target="_blank">Graphology</a>
+        is a graph <em>data structure</em> with a rich algorithm library (centrality,
+        community, traversal, generators) — it does not render. <a href="https://www.sigmajs.org/"
+        target="_blank">Sigma.js</a> renders Graphology graphs to WebGL. Together they are
+        the closest thing to "NetworkX + matplotlib for the browser":</p>
+    <pre><code>// graphology
+import Graph from "graphology";
+import { density, modularity } from "graphology-metrics";
+import louvain from "graphology-communities-louvain";
+
+const graph = new Graph();
+graph.addNode("alice", { x: 0, y: 0, size: 5 });
+graph.addNode("bob",   { x: 1, y: 1, size: 5 });
+graph.addEdge("alice", "bob");
+
+louvain.assign(graph);                          // adds .community attribute
+console.log(density(graph), modularity(graph)); // numbers</code></pre>
+    <pre><code>// sigma
+import Sigma from "sigma";
+const renderer = new Sigma(graph, document.getElementById("container"));
+// that's the entire renderer. Tens of thousands of nodes, interactive.</code></pre>
+    <p>The architecture lesson: <strong>separate the data structure from the renderer</strong>.
+        D3's data join blurs the two; that's fine for flexibility, painful when the renderer
+        is the bottleneck. Graphology/sigma is the orthogonal design — data and rendering each
+        evolve independently.</p>
+
+    <h2>5. When to <em>stay</em> in D3</h2>
+    <p>The pitch above is mostly about leaving D3. The counter-argument: D3 is the most
+        flexible option for visualisations that are <em>not</em> off-the-shelf node-link
+        diagrams. A few categories where D3 stays the right answer at any scale:</p>
+    <ul>
+        <li><strong>Multi-view dashboards</strong> where the network is one panel among many
+            (timeline, map, scatter, table). D3 composes naturally; embedding sigma.js into a
+            larger D3 layout is fighting the API.</li>
+        <li><strong>Bespoke visual encoding</strong> — chord diagrams, sankey, edge bundling,
+            arc diagrams. All of L12. The other libraries focus on node-link.</li>
+        <li><strong>Print-quality SVG export</strong>. D3 produces SVG you can ship to a
+            publication. WebGL renderers need a screenshot path.</li>
+        <li><strong>Animation-heavy storytelling</strong> — the transition vocabulary from 10b
+            and the patterns in 12e (snapshots, streaming). D3 transitions interpolate
+            cleanly across these states; sigma's animation API is much narrower.</li>
+    </ul>
+
+    <div class="note"><strong>Takeaway.</strong> D3 is the right answer for custom-encoded
+        networks up to ~10k nodes with a Canvas renderer and the 11e/11f scale story; for larger graphs or
+        off-the-shelf node-link UIs, Cytoscape.js (≤ 50k), sigma.js+Graphology (≤ 500k), or
+        Cosmograph (≥ 1M) each have their place. The architectural insight worth
+        carrying: <em>separate the data structure from the renderer</em>. That's the design
+        that lets sigma render what Graphology stores, and it's the same design that lets you
+        push d3-force into a Web Worker and Canvas into a separate paint path.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://js.cytoscape.org/" target="_blank">Cytoscape.js</a></li>
+        <li><a href="https://www.sigmajs.org/" target="_blank">sigma.js</a> /
+            <a href="https://graphology.github.io/" target="_blank">Graphology</a></li>
+        <li><a href="https://cosmograph.app/" target="_blank">Cosmograph</a></li>
+        <li><a href="https://gephi.org/" target="_blank">Gephi</a></li>
+        <li><a href="https://github.com/visjs/vis-network" target="_blank">vis-network</a></li>
+        <li><a href="https://pyvis.readthedocs.io/" target="_blank">PyVis</a></li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="12e-dynamic-graphs.html">← 12e — Dynamic graphs</a> ·
+        <a href="index.html">L12 index</a> ·
+        <a href="12g-capstone-comparison.html">12g — Capstone →</a></p>
+
+</body>
+
+</html>

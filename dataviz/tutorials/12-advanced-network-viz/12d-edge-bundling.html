@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12d — Edge bundling</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/upphiminn/d3.ForceBundle@master/d3-ForceEdgeBundling.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+</head>
+
+<body>
+    <h1>12d — Edge bundling</h1>
+    <p class="lead">Edge bundling tames a dense hairball by routing edges that travel together along
+        shared paths, the way cables get tied into looms. This tutorial covers both families: the
+        <strong>hierarchical</strong> kind (§1–4), which groups edges by a tree the data already implies
+        (folders containing files, communities containing nodes), and the
+        <strong>force-directed</strong> kind (§5, FDEB), which needs no hierarchy at all. Both turn a
+        tangle of straight lines into a far quieter picture.</p>
+
+    <h2>1. Build a hierarchy on top of the flat node list</h2>
+    <p>The nodes in our GoT JSON are flat — they only carry a community id. To bundle, we wrap them in a
+        synthetic two-level tree (<code>root → community → character</code>) and feed that to
+        <code>d3.hierarchy</code>:</p>
+    <pre><code>const root = d3.hierarchy({
+    name: "got",
+    children: communities.map(c =&gt; ({
+        name: "c" + c,
+        children: nodes.filter(n =&gt; n.community === c)
+                       .map(n =&gt; ({ name: n.id, ...n }))
+    }))
+});</code></pre>
+    <p>Then a circular cluster layout places every leaf on the perimeter, grouped by community:</p>
+    <pre><code>const cluster = d3.cluster().size([2 * Math.PI, radius - 80]);
+cluster(root);                             // mutates: each node gets x (angle) and y (radius)</code></pre>
+
+    <h2>2. Path the edges through the lowest common ancestor</h2>
+    <p>For each link we look up the source and target leaves in the hierarchy and draw the curve via
+        their <em>least common ancestor</em>. <code>d3.lineRadial</code> with a bundled curve generates
+        the path string:</p>
+    <pre><code>const line = d3.lineRadial()
+    .curve(d3.curveBundle.beta(0.85))
+    .radius(d =&gt; d.y)
+    .angle(d =&gt; d.x);
+
+paths.attr("d", l =&gt; line(l.source.path(l.target)));   // hierarchy.path(other)</code></pre>
+    <p>The <strong>beta</strong> parameter on <code>curveBundle</code> controls how tightly bundled the
+        curves are: <code>0</code> = straight lines through the LCA, <code>1</code> = pulled completely
+        toward the LCA. Values near <code>0.85</code> are the conventional sweet spot.</p>
+
+    <h2>3. The rendered network</h2>
+    <p>Below: the GoT network as a bundled radial diagram. Hover any leaf — its edges take the colour
+        of the community they connect to, and every other edge fades, so you can see at a glance which
+        communities a character reaches. The community structure is instantly readable from the colour
+        bands along the rim.</p>
+    <div class="container" id="demo-bundle"></div>
+    <p class="example-link"><a href="examples/12d/01-hierarchical-bundling.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <h2>4. When bundling helps</h2>
+    <ul>
+        <li>✅ The graph has a meaningful tree above it (folder hierarchy, package structure, community
+            partition) and most edges connect siblings within the same subtree.</li>
+        <li>✅ You want the global picture without the visual cost of a node-link hairball.</li>
+        <li>❌ The hierarchy is artificial or doesn't reflect actual edge structure — bundling forces
+            curves through arbitrary midpoints and the picture lies.</li>
+        <li>❌ Reading individual edges matters — bundles share strokes and become ambiguous.</li>
+    </ul>
+
+    <h2>5. The other family — force-directed edge bundling</h2>
+    <p>The radial layout above uses an <em>explicit hierarchy</em> to define the bundles. The other
+        canonical approach (Holten &amp; van Wijk, 2009) needs no hierarchy at all: subdivide every edge
+        into a chain of <strong>control points</strong>, pin the two endpoints, and let the control
+        points of nearby, similarly-directed edges <strong>attract each other</strong> — so edges that
+        run roughly parallel merge into a bundle. We use the
+        <a href="https://github.com/upphiminn/d3.ForceBundle" target="_blank"><code>d3.ForceEdgeBundling</code></a>
+        implementation: feed it node positions and an edge list, and it returns, for each edge, a
+        poly-line of subdivision points to draw a curve through:</p>
+    <pre><code>// 1. every node needs an (x, y) — here from a quick force pass
+const nodes = {};                          // { id: {x, y}, … }
+graphNodes.forEach(d =&gt; nodes[d.id] = { x: d.x, y: d.y });
+
+// 2. edges reference node ids
+const edges = links.map(l =&gt; ({ source: l.source, target: l.target }));
+
+// 3. run FDEB — returns, per edge, an array of subdivision points pulled
+//    toward compatible (parallel, nearby) edges
+const bundled = d3.ForceEdgeBundling()
+    .nodes(nodes)
+    .edges(edges)
+    .bundling_stiffness(0.1)
+    .step_size(0.1)
+    .compatibility_threshold(0.6)();
+
+// 4. draw each edge as a smooth curve through its subdivision points
+const line = d3.line().curve(d3.curveBasis).x(d =&gt; d.x).y(d =&gt; d.y);
+edgePaths.data(bundled).join("path").attr("d", line);</code></pre>
+    <p>The result on the same GoT network — same nodes, same edges, no hierarchy needed. The bundling
+        runs once (it compares every pair of edges, so it takes a moment on the full edge set):</p>
+    <div class="container" id="demo-force-bundle"></div>
+    <p class="example-link"><a href="examples/12d/02-force-directed-bundling.html" target="_blank" rel="noopener">↗ example</a></p>
+    <p>Compared with the radial bundling above, force-directed bundling is easier to read at a glance
+        but loses the obvious community grouping that the explicit hierarchy provides. Both are
+        legitimate — pick whichever matches the structure you want to highlight.</p>
+
+    <div class="note"><strong>Takeaway.</strong> Two bundling families:
+        <strong>hierarchical</strong> (this tutorial's first demo) needs a tree;
+        <strong>force-directed</strong> (Holten &amp; van Wijk, second demo) needs only the original edge
+        list. The first reveals group structure, the second emphasises pure edge-flow patterns. Both
+        compress edge ink dramatically compared to a straight node-link view.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://observablehq.com/@d3/hierarchical-edge-bundling" target="_blank">Observable —
+            hierarchical edge bundling</a> (Mike Bostock).</li>
+        <li><a href="https://www.cs.rug.nl/~alext/PAPERS/EuroVis09/paper.pdf" target="_blank">Holten &amp;
+            van Wijk, <em>Force-Directed Edge Bundling for Graph Visualization</em></a> (2009).</li>
+        <li><a href="https://github.com/d3/d3-shape#curves" target="_blank">d3-shape · curves</a> — every
+            curve type, including <code>curveBundle</code>.</li>
+        <li><a href="https://github.com/upphiminn/d3.ForceBundle" target="_blank">d3.ForceBundle</a> —
+            the force-directed edge bundling implementation used in §5.</li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="12c-sankey.html">← 12c — Sankey</a> ·
+        <a href="index.html">L12 index</a> ·
+        <a href="12e-dynamic-graphs.html">12e — Dynamic graphs →</a></p>
+
+    <script>
+        const DATA_URL = "./datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const nodes = raw.nodes;
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            // --- build hierarchy: root → community → character ---
+            const communities = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+            const tree = {
+                name: "got",
+                children: communities.map(c => ({
+                    name: "c" + c,
+                    community: c,
+                    children: nodes.filter(n => n.community === c)
+                        .sort((a, b) => d3.descending(a.bc, b.bc))
+                        .map(n => ({ name: n.id, leaf: true, ...n }))
+                }))
+            };
+
+            const c = makeCanvas("#demo-bundle", 720,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+            const cx = c.innerW / 2, cy = c.innerH / 2;
+            const radius = Math.min(cx, cy);
+
+            const root = d3.hierarchy(tree);
+            const cluster = d3.cluster().size([2 * Math.PI, radius - 90]);
+            cluster(root);
+
+            // map id → leaf node in hierarchy
+            const byId = new Map(root.leaves().map(l => [l.data.name, l]));
+
+            // turn flat links into hierarchy paths
+            const bundleLinks = raw.links
+                .map(l => ({
+                    source: byId.get(l.source),
+                    target: byId.get(l.target),
+                    weight: l.weight
+                }))
+                .filter(l => l.source && l.target);
+
+            const g = c.plot.append("g").attr("transform", `translate(${cx}, ${cy})`);
+
+            const line = d3.lineRadial()
+                .curve(d3.curveBundle.beta(0.85))
+                .radius(d => d.y)
+                .angle(d => d.x);
+
+            const linkPaths = g.append("g")
+                .attr("fill", "none")
+                .attr("stroke", "#888")
+                .attr("stroke-opacity", 0.25)
+                .selectAll("path")
+                .data(bundleLinks).join("path")
+                .attr("d", l => line(l.source.path(l.target)));
+
+            const leafG = g.append("g");
+            const leaves = root.leaves();
+            const leafCircles = leafG.selectAll("circle").data(leaves).join("circle")
+                .attr("transform", d =>
+                    `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y}, 0)`)
+                .attr("r", 3.5)
+                .attr("fill", d => colour(d.data.community))
+                .attr("stroke", "white").attr("stroke-width", 0.6)
+                .style("cursor", "pointer");
+
+            const leafLabels = leafG.selectAll("text").data(leaves).join("text")
+                .attr("transform", d => {
+                    const deg = d.x * 180 / Math.PI - 90;
+                    const flip = (d.x >= Math.PI);
+                    return `rotate(${deg}) translate(${d.y + 8}, 0)${flip ? " rotate(180)" : ""}`;
+                })
+                .attr("dy", 3)
+                .attr("text-anchor", d => d.x >= Math.PI ? "end" : "start")
+                .style("font-size", "10px")
+                .style("fill", "#444")
+                .text(d => d.data.name.replace(/-/g, " "));
+
+            leafCircles.on("mouseenter", (e, d) => {
+                linkPaths.attr("stroke", l => {
+                    const inc = (l.source === d || l.target === d);
+                    if (!inc) return "#ccc";
+                    const other = l.source === d ? l.target : l.source;
+                    return colour(other.data.community);
+                })
+                    .attr("stroke-opacity", l =>
+                        (l.source === d || l.target === d) ? 0.95 : 0.04)
+                    .attr("stroke-width", l =>
+                        (l.source === d || l.target === d) ? 1.5 : 1);
+                leafLabels.style("font-weight", x => x === d ? "bold" : null)
+                    .style("fill", x => x === d ? "#000" : "#888");
+            });
+            leafCircles.on("mouseleave", () => {
+                linkPaths.attr("stroke", "#888")
+                    .attr("stroke-opacity", 0.25)
+                    .attr("stroke-width", 1);
+                leafLabels.style("font-weight", null).style("fill", "#444");
+            });
+
+            leafCircles.append("title").text(d =>
+                `${d.data.name.replace(/-/g, " ")}\ncommunity ${d.data.community}`);
+
+            // ============================================================
+            // §5. Force-directed edge bundling (Holten & van Wijk),
+            //     via the d3.ForceEdgeBundling library.
+            // ============================================================
+            const fbCanvas = makeCanvas("#demo-force-bundle", 720,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+
+            // 1. seed node positions with a quick force pass (no boundary clamp,
+            //    so the layout can spread naturally)
+            const termNodes = nodes.map(d => ({ ...d }));
+            const termLinks = raw.links
+                .map(l => ({ source: l.source, target: l.target }))
+                .filter(l => l.source !== l.target);
+            const seed = d3.forceSimulation(termNodes)
+                .force("link", d3.forceLink(termLinks).id(d => d.id).distance(30))
+                .force("charge", d3.forceManyBody().strength(-70))
+                .force("collide", d3.forceCollide().radius(5))
+                .force("center", d3.forceCenter(fbCanvas.innerW / 2, fbCanvas.innerH / 2))
+                .stop();
+            for (let i = 0; i < 300; i++) seed.tick();
+
+            // rescale the seeded coordinates to fill the canvas (keeps node radius
+            // and stroke constant — no <g> scaling)
+            const pad = 24;
+            const xs = termNodes.map(d => d.x), ys = termNodes.map(d => d.y);
+            const x0 = d3.min(xs), x1 = d3.max(xs), y0 = d3.min(ys), y1 = d3.max(ys);
+            const k = Math.min((fbCanvas.innerW - 2 * pad) / ((x1 - x0) || 1),
+                               (fbCanvas.innerH - 2 * pad) / ((y1 - y0) || 1));
+            const ox = pad + (fbCanvas.innerW - 2 * pad - k * (x1 - x0)) / 2;
+            const oy = pad + (fbCanvas.innerH - 2 * pad - k * (y1 - y0)) / 2;
+            termNodes.forEach(d => { d.x = ox + k * (d.x - x0); d.y = oy + k * (d.y - y0); });
+
+            const fbEdgeG = fbCanvas.plot.append("g")
+                .attr("fill", "none").attr("stroke", "#555").attr("stroke-opacity", 0.18);
+            const fbNodeG = fbCanvas.plot.append("g");
+            const fbStatus = fbCanvas.plot.append("text")
+                .attr("x", fbCanvas.innerW / 2).attr("y", fbCanvas.innerH / 2)
+                .attr("text-anchor", "middle")
+                .style("font-size", "var(--text-md)").style("fill", "#777")
+                .text("bundling edges…");
+
+            // draw nodes first, so something is on screen before the bundler finishes
+            fbNodeG.selectAll("circle").data(termNodes).join("circle")
+                .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 3.5)
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 0.6);
+
+            // 2. run FDEB after the first paint (it is O(E²) over ~680 edges)
+            setTimeout(() => {
+                const fbNodes = {};
+                termNodes.forEach(d => { fbNodes[d.id] = { x: d.x, y: d.y }; });
+                const fbEdges = termLinks.map(l => ({
+                    source: l.source.id ?? l.source,
+                    target: l.target.id ?? l.target
+                }));
+
+                const bundled = d3.ForceEdgeBundling()
+                    .nodes(fbNodes).edges(fbEdges)
+                    .bundling_stiffness(0.1)
+                    .step_size(0.1)
+                    .compatibility_threshold(0.6)();
+
+                const line = d3.line().curve(d3.curveBasis).x(d => d.x).y(d => d.y);
+                fbEdgeG.selectAll("path").data(bundled).join("path")
+                    .attr("d", d => line(d));
+                fbStatus.remove();
+            }, 30);
+        });
+    </script>
+</body>
+
+</html>

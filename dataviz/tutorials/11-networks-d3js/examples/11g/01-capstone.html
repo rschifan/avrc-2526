@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11e — capstone GoT network viewer</title>
+    <title>11g — capstone GoT network viewer</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
@@ -19,11 +19,11 @@
 </head>
 
 <body>
-    <h1>11e — Capstone: complete GoT network viewer</h1>
-    <p class="lead">Everything from 11a–11d in one demo: data load, force layout, community
+    <h1>11g — Capstone: complete GoT network viewer</h1>
+    <p class="lead">Everything from 11a–11e in one demo: data load, force layout, community
         colour, centrality size, drag, hover-to-highlight, click-to-pin, semantic zoom, search
         box, community filter, community hulls.
-        <a href="../../11e-capstone.html">Source tutorial &rarr;</a></p>
+        <a href="../../11g-capstone.html">Source tutorial &rarr;</a></p>
 
     <div class="note">
         <h3>How the source is organised</h3>
@@ -104,8 +104,11 @@
         // 3. CANVAS + MARKS
         // =====================================================================
 
+        // pan:false — this viewer installs its own semantic zoom (section 7) on
+        // the same zoomG that holds the marks; we don't want makeCanvas's default
+        // pan/zoom on c.plot competing with it.
         const c = makeCanvas("#graph", 600,
-            { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            { margin: { top: 10, right: 10, bottom: 10, left: 10 }, pan: false });
 
         // All marks live inside a single zoomG so the zoom transform composes.
         const zoomG = c.plot.append("g");
@@ -161,18 +164,19 @@
                 d => d.community);
             const hulls = [...groups].flatMap(([key, members]) => {
                 if (members.length < 3) return [];
+                // on hover, draw only the communities the focal node reaches
+                if (focusedHulls && !focusedHulls.has(key)) return [];
                 const pts = members.map(d => [d.x, d.y]);
                 const hull = d3.polygonHull(pts);
                 return hull ? [{ key, points: hull }] : [];
             });
-            const inFocus = h => focusedHulls === null || focusedHulls.has(h.key);
             hullG.selectAll("path").data(hulls, d => d.key).join("path")
                 .attr("d",            d => hullCurve(d.points))
                 .attr("fill",         d => colour(d.key))
-                .attr("fill-opacity", d => inFocus(d) ? STYLE.hull.fill   : STYLE.hull.fillDim)
+                .attr("fill-opacity", STYLE.hull.fill)
                 .attr("stroke",       d => colour(d.key))
                 .attr("stroke-width", 1.4)
-                .attr("stroke-opacity", d => inFocus(d) ? STYLE.hull.stroke : STYLE.hull.strokeDim);
+                .attr("stroke-opacity", STYLE.hull.stroke);
         }
 
         // Label visibility = community active AND (zoomed past threshold OR
@@ -197,6 +201,7 @@
             d3.select("#legend").selectAll("button").style("opacity", function () {
                 return active.has(+this.dataset.comm) ? 1 : 0.35;
             });
+            drawHulls();   // recompute so filtered-out communities' hulls disappear
         }
 
         // =====================================================================
@@ -224,9 +229,11 @@
         // =====================================================================
 
         // --- Drag --------------------------------------------------------------
-        // .container(plot.node()) makes pointer coords pan/zoom-aware.
+        // container = zoomG (the element the zoom transform is applied to), so
+        // pointer coords resolve in node space and dragging stays accurate when
+        // the view is zoomed.
         node.call(d3.drag()
-            .container(() => c.plot.node())
+            .container(() => zoomG.node())
             .on("start", (e, d) => {
                 if (!e.active) sim.alphaTarget(0.3).restart();
                 d.fx = d.x; d.fy = d.y;
@@ -360,7 +367,8 @@
                 link.attr("stroke-width", inv);
                 node.attr("r", d => r(d.bc) * inv)
                     .attr("stroke-width", d => (d.pinned ? STYLE.pin.strokeWidth : 1) * inv);
-                label.style("font-size", `${12 * inv}px`)
+                label.attr("dy", d => -(r(d.bc) + 4) * inv)   // offset counter-scales, so labels stay put
+                     .style("font-size", `${12 * inv}px`)
                      .style("stroke-width", 3 * inv);
                 hullG.selectAll("path").attr("stroke-width", 1.4 * inv);
                 applyLabelDisplay();
@@ -428,10 +436,10 @@
     </script>
 
     <nav class="example-nav">
-        <a href="../11d/02-community-hulls.html">&larr; Prev: 11d §3 community hulls</a>
+        <a href="../11f/01-worker-simulation.html">&larr; Prev: 11f Web Worker simulation</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="../11f/01-empty-force.html">Next: 11f — Stage 1: empty force &rarr;</a>
+        <span></span>
     </nav>
 </body>
 

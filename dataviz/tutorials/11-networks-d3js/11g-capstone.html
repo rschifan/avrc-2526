@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11e — Capstone: a complete GoT network viewer</title>
+    <title>11g — Capstone: a complete GoT network viewer</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="./_shared/chart.js?v=3"></script>
     <link rel="stylesheet" href="./_shared/chart.css">
@@ -21,8 +21,8 @@
 </head>
 
 <body>
-    <h1>11e — Capstone: a complete GoT network viewer</h1>
-    <p class="lead">Everything from <code>11a</code>–<code>11d</code> in one demo: data load, force layout,
+    <h1>11g — Capstone: a complete GoT network viewer</h1>
+    <p class="lead">Everything from <code>11a</code>–<code>11e</code> in one demo: data load, force layout,
         community colour, centrality size, drag, hover-to-highlight, click-to-pin, semantic zoom, plus a
         <strong>search box</strong> and a <strong>community filter</strong>. Read the source as a checklist
         of every pattern in this lecture.</p>
@@ -46,7 +46,7 @@
     </div>
     <div id="legend" class="toolbar"></div>
     <div class="container" id="graph"></div>
-    <p class="example-link"><a href="examples/11e/01-capstone.html" target="_blank" rel="noopener">↗ example</a></p>
+    <p class="example-link"><a href="examples/11g/01-capstone.html" target="_blank" rel="noopener">↗ example</a></p>
 
     <h2>What's where in the code</h2>
     <ul>
@@ -57,7 +57,7 @@
         <li><strong>Hover</strong> — precomputed neighbour set, opacity fade (11c).</li>
         <li><strong>Click pin</strong> — toggle <code>fx</code>/<code>fy</code> (11c).</li>
         <li><strong>Zoom</strong> — <code>d3.zoom</code> on a wrapper <code>&lt;g&gt;</code>, with semantic
-            stroke / label-size adjustments (11d).</li>
+            stroke / label-size adjustments (11e).</li>
         <li><strong>Search</strong> — input event applies a "match" highlight class.</li>
         <li><strong>Community filter</strong> — clicking a legend swatch toggles a community in/out of an
             active set; node and link <code>display</code> driven by membership.</li>
@@ -68,9 +68,8 @@
         lecture covers four alternatives — adjacency matrix, chord diagram, sankey, hierarchical edge
         bundling — and when each one is the right call.</div>
 
-    <p class="tutorial-nav"><a href="11d-encoding-and-zoom.html">← 11d — Encoding</a> ·
-        <a href="index.html">L11 index</a> ·
-        <a href="11f-progressive-build.html">11f — Progressive build →</a></p>
+    <p class="tutorial-nav"><a href="11f-web-workers.html">← 11f — Web Worker simulation</a> ·
+        <a href="index.html">L11 index</a></p>
 
     <script>
     // =========================================================================
@@ -115,8 +114,11 @@
         // 3. CANVAS + MARKS
         // =====================================================================
 
+        // pan:false — this viewer installs its own semantic zoom (below) on the
+        // same zoomG that holds the marks, so we don't want makeCanvas's default
+        // pan/zoom on c.plot competing with it.
         const c = makeCanvas("#graph", 600,
-            { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            { margin: { top: 10, right: 10, bottom: 10, left: 10 }, pan: false });
 
         const zoomG = c.plot.append("g");
         const hullG = zoomG.append("g").attr("class", "hulls");
@@ -168,17 +170,18 @@
                 nodes.filter(n => active.has(n.community)), d => d.community);
             const hulls = [...groups].flatMap(([key, members]) => {
                 if (members.length < 3) return [];
+                // on hover, draw only the communities the focal node reaches
+                if (focusedHulls && !focusedHulls.has(key)) return [];
                 const hull = d3.polygonHull(members.map(d => [d.x, d.y]));
                 return hull ? [{ key, points: hull }] : [];
             });
-            const inFocus = h => focusedHulls === null || focusedHulls.has(h.key);
             hullG.selectAll("path").data(hulls, d => d.key).join("path")
                 .attr("d",            d => hullCurve(d.points))
                 .attr("fill",         d => colour(d.key))
-                .attr("fill-opacity", d => inFocus(d) ? STYLE.hull.fill   : STYLE.hull.fillDim)
+                .attr("fill-opacity", STYLE.hull.fill)
                 .attr("stroke",       d => colour(d.key))
                 .attr("stroke-width", 1.4)
-                .attr("stroke-opacity", d => inFocus(d) ? STYLE.hull.stroke : STYLE.hull.strokeDim);
+                .attr("stroke-opacity", STYLE.hull.stroke);
         }
 
         // Label shown iff community is active AND (zoomed past threshold OR
@@ -199,6 +202,7 @@
             d3.select("#legend").selectAll("button").style("opacity", function () {
                 return active.has(+this.dataset.comm) ? 1 : 0.35;
             });
+            drawHulls();   // recompute so filtered-out communities' hulls disappear
         }
 
         // =====================================================================
@@ -226,8 +230,11 @@
         // =====================================================================
 
         // --- Drag --------------------------------------------------------------
+        // container = zoomG (the element the zoom transform is applied to), so
+        // pointer coords resolve in node space and dragging stays accurate when
+        // the view is zoomed.
         node.call(d3.drag()
-            .container(() => c.plot.node())
+            .container(() => zoomG.node())
             .on("start", (e, d) => {
                 if (!e.active) sim.alphaTarget(0.3).restart();
                 d.fx = d.x; d.fy = d.y;
@@ -354,7 +361,8 @@
                 link.attr("stroke-width", inv);
                 node.attr("r", d => r(d.bc) * inv)
                     .attr("stroke-width", d => (d.pinned ? STYLE.pin.strokeWidth : 1) * inv);
-                label.style("font-size", `${12 * inv}px`)
+                label.attr("dy", d => -(r(d.bc) + 4) * inv)   // offset counter-scales, so labels stay put
+                     .style("font-size", `${12 * inv}px`)
                      .style("stroke-width", 3 * inv);
                 hullG.selectAll("path").attr("stroke-width", 1.4 * inv);
                 applyLabelDisplay();

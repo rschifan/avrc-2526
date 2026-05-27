@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12d — force-directed edge bundling</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/upphiminn/d3.ForceBundle@master/d3-ForceEdgeBundling.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>12d — Force-directed edge bundling</h1>
+    <p class="lead">The same GoT network bundled <em>without</em> a hierarchy (Holten &amp; van Wijk),
+        via the <a href="https://github.com/upphiminn/d3.ForceBundle" target="_blank">d3.ForceEdgeBundling</a>
+        library: subdivide each edge, pin the endpoints, and let the control points of nearby parallel
+        edges attract one another. <a href="../../12d-edge-bundling.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>No hierarchy needed.</strong> FDEB takes node positions (from a quick force pass)
+                and an edge list, and returns a poly-line of subdivision points per edge.</li>
+            <li><strong>Compatible edges merge.</strong> Edges that run roughly parallel and near each
+                other bundle together; the result emphasises overall edge-flow patterns.</li>
+            <li><strong>Runs once.</strong> The algorithm compares every pair of edges (O(E²)), so it
+                takes a moment on the full edge set — hence the brief "bundling…" message.</li>
+        </ul>
+    </div>
+
+    <div class="container" id="demo-force-bundle"></div>
+
+    <script>
+        const DATA_URL = "../../datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const nodes = raw.nodes;
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const fbCanvas = makeCanvas("#demo-force-bundle", 720,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+
+            // 1. seed node positions with a quick force pass (no boundary clamp)
+            const termNodes = nodes.map(d => ({ ...d }));
+            const termLinks = raw.links
+                .map(l => ({ source: l.source, target: l.target }))
+                .filter(l => l.source !== l.target);
+            const seed = d3.forceSimulation(termNodes)
+                .force("link", d3.forceLink(termLinks).id(d => d.id).distance(30))
+                .force("charge", d3.forceManyBody().strength(-70))
+                .force("collide", d3.forceCollide().radius(5))
+                .force("center", d3.forceCenter(fbCanvas.innerW / 2, fbCanvas.innerH / 2))
+                .stop();
+            for (let i = 0; i < 300; i++) seed.tick();
+
+            // rescale seeded coordinates to fill the canvas (constant node radius / stroke)
+            const pad = 24;
+            const xs = termNodes.map(d => d.x), ys = termNodes.map(d => d.y);
+            const x0 = d3.min(xs), x1 = d3.max(xs), y0 = d3.min(ys), y1 = d3.max(ys);
+            const k = Math.min((fbCanvas.innerW - 2 * pad) / ((x1 - x0) || 1),
+                               (fbCanvas.innerH - 2 * pad) / ((y1 - y0) || 1));
+            const ox = pad + (fbCanvas.innerW - 2 * pad - k * (x1 - x0)) / 2;
+            const oy = pad + (fbCanvas.innerH - 2 * pad - k * (y1 - y0)) / 2;
+            termNodes.forEach(d => { d.x = ox + k * (d.x - x0); d.y = oy + k * (d.y - y0); });
+
+            const fbEdgeG = fbCanvas.plot.append("g")
+                .attr("fill", "none").attr("stroke", "#555").attr("stroke-opacity", 0.18);
+            const fbNodeG = fbCanvas.plot.append("g");
+            const fbStatus = fbCanvas.plot.append("text")
+                .attr("x", fbCanvas.innerW / 2).attr("y", fbCanvas.innerH / 2)
+                .attr("text-anchor", "middle")
+                .style("font-size", "var(--text-md)").style("fill", "#777")
+                .text("bundling edges…");
+
+            fbNodeG.selectAll("circle").data(termNodes).join("circle")
+                .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 3.5)
+                .attr("fill", d => colour(d.community))
+                .attr("stroke", "white").attr("stroke-width", 0.6);
+
+            // 2. run FDEB after the first paint (O(E²) over ~680 edges)
+            setTimeout(() => {
+                const fbNodes = {};
+                termNodes.forEach(d => { fbNodes[d.id] = { x: d.x, y: d.y }; });
+                const fbEdges = termLinks.map(l => ({
+                    source: l.source.id ?? l.source,
+                    target: l.target.id ?? l.target
+                }));
+
+                const bundled = d3.ForceEdgeBundling()
+                    .nodes(fbNodes).edges(fbEdges)
+                    .bundling_stiffness(0.1)
+                    .step_size(0.1)
+                    .compatibility_threshold(0.6)();
+
+                const line = d3.line().curve(d3.curveBasis).x(d => d.x).y(d => d.y);
+                fbEdgeG.selectAll("path").data(bundled).join("path").attr("d", d => line(d));
+                fbStatus.remove();
+            }, 30);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-hierarchical-bundling.html">&larr; Prev: 12d hierarchical bundling</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="../12e/01-streaming-additions.html">Next: 12e streaming additions &rarr;</a>
+    </nav>
+</body>
+
+</html>

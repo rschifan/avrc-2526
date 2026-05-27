@@ -3,28 +3,28 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11f — Stage 4: zoom-aware labels</title>
+    <title>11e §1 — semantic zoom (zoom-aware labels)</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
 </head>
 
 <body>
-    <h1>11f — Stage 4: Zoom-aware labels</h1>
+    <h1>11e §1 — Semantic zoom (zoom-aware labels)</h1>
     <p class="lead"><code>d3.zoom</code> on a wrapping <code>&lt;g&gt;</code>, with
         <strong>zoom-invariant sizing</strong>: every visual size attribute divides by
         <code>k</code> so strokes, radii and labels stay constant in screen pixels. Labels reveal
         only at <code>k ≥ 1.5</code>.
-        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+        <a href="../../11e-rendering-and-scale.html">Source tutorial &rarr;</a>
     </p>
 
     <div class="note">
-        <h3>What this stage adds (vs the previous stage)</h3>
-        <p>One ingredient: a zoom behaviour and a clever rewrite of all visual sizes on every
-            event. The result feels like "the chart zooms but the marks don't" — typography
-            stays legible, dots stay readable, edges stay thin. This is the same pattern as
-            10e's group-transform zoom, with the extra step of counter-scaling every size
-            attribute so it looks crisp at every zoom level.</p>
+        <h3>What this example shows</h3>
+        <p>One ingredient: a zoom behaviour and a rewrite of all visual sizes on every event.
+            The result feels like "the chart zooms but the marks don't" — typography stays
+            legible, dots stay readable, edges stay thin. This is the same group-transform zoom
+            from 10e, with the extra step of counter-scaling every size attribute so it looks
+            crisp at every zoom level.</p>
         <ul>
             <li><strong>Wrapper-group transform</strong>:
                 <code>zoomG.attr("transform", event.transform)</code>. SVG composes this with all
@@ -43,9 +43,10 @@
                 At low zoom, only the 12 most-central characters are labelled (a curated set);
                 zoom in and everyone gets a label. Same idea as semantic zoom in cartography:
                 more detail emerges as you get closer.</li>
-            <li><strong>No fit-to-canvas</strong> here: user zoom would fight the auto-fit
-                transform. Instead we add <code>boundaryForce</code> to keep nodes inside the
-                canvas during simulation. Pick one or the other — they don't compose.</li>
+            <li><strong>No fit-to-canvas</strong> here: an auto-fit transform on the wrapper would
+                fight the user's zoom transform. Instead the gentle
+                <code>forceX</code>/<code>forceY</code> pull toward the canvas centre keeps the
+                layout on screen during simulation. Pick one or the other — they don't compose.</li>
             <li><strong>Wheel to zoom, drag to pan</strong>. <code>scaleExtent([0.3, 8])</code>
                 lets the user zoom out to 30% and in to 8×.</li>
         </ul>
@@ -57,7 +58,7 @@
         d3.json("../../datasets/got.json").then(raw => {
             const colour = d3.scaleOrdinal(d3.schemeTableau10);
             const c = makeCanvas("#demo", 600,
-                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 }, pan: false });
             const nodes = raw.nodes.map(d => ({ ...d }));
             const links = raw.links.map(d => ({ ...d }));
             const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
@@ -104,7 +105,8 @@
                     zoomG.attr("transform", event.transform);
                     node.attr("r", d => r(d.bc) * inv).attr("stroke-width", inv);
                     link.attr("stroke-width", inv);
-                    label.style("display", d =>
+                    label.attr("dy", d => -(r(d.bc) + 4) * inv)   // keep a constant screen-px gap
+                        .style("display", d =>
                         (k >= 1.5 || topLabelled.has(d.id)) ? null : "none")
                         .style("font-size", `${12 * inv}px`)
                         .style("stroke-width", 3 * inv);
@@ -117,10 +119,10 @@
     </script>
 
     <nav class="example-nav">
-        <a href="03-drag-and-hover.html">&larr; Prev: drag and hover</a>
+        <a href="../11d/03-community-hulls.html">&larr; Prev: 11d §4 community hulls</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="05-foreignobject-labels.html">Next: stage 5 — styled label boxes &rarr;</a>
+        <a href="02-foreignobject-labels.html">Next: §2 styled label boxes &rarr;</a>
     </nav>
 </body>
 

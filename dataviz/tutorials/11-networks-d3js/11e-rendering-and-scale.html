@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>11e — Rendering and scale</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+</head>
+
+<body>
+    <h1>11e — Rendering and scale</h1>
+    <p class="lead">After 11a–11d you have a working force graph: laid out, interactive, encoded by
+        colour and size. This tutorial covers the three techniques that make such a view hold up in
+        practice — <strong>semantic zoom</strong> so it stays legible at any zoom level,
+        <strong>HTML-quality labels</strong> via <code>foreignObject</code>, and the
+        <strong>performance levers</strong> to reach for as the graph grows. None of these change
+        what the graph <em>is</em>; they change how well it <em>reads</em> and how far it
+        <em>scales</em>.</p>
+
+    <h2>1. Semantic zoom</h2>
+    <p>Plain <code>d3.zoom</code> on a wrapping <code>&lt;g&gt;</code> scales everything uniformly:
+        zoom in 2× and a 4-pixel circle becomes 8 pixels, a 1-pixel stroke becomes 2, the labels
+        double. That is rarely what you want from a network — you want to get <em>closer</em> to the
+        layout, not magnify the ink. <strong>Semantic zoom</strong> keeps the geometry zooming while
+        holding the mark sizes constant in screen pixels, and reveals detail (labels) only once you
+        are close enough to read it.</p>
+    <p>Two ingredients. First, transform the wrapper group so the positions zoom; second, divide
+        every <em>size</em> attribute by the zoom factor <code>k</code> so the ink stays put:</p>
+    <pre><code>const zoomG = c.plot.append("g");          // every mark lives in here
+
+const zoom = d3.zoom().scaleExtent([0.3, 8])
+    .on("zoom", e =&gt; {
+        const k = e.transform.k, inv = 1 / k;
+        zoomG.attr("transform", e.transform);          // positions zoom
+        node.attr("r", d =&gt; r(d.bc) * inv)             // sizes counter-scale
+            .attr("stroke-width", inv);
+        link.attr("stroke-width", inv);
+        label.attr("dy", d =&gt; -(r(d.bc) + 4) * inv)    // offset counter-scales too…
+             .style("font-size", `${12 * inv}px`)       // …so does the type
+             .style("stroke-width", 3 * inv)
+             // reveal labels only past a zoom threshold (plus a curated few)
+             .style("display", d =&gt; (k &gt;= 1.5 || topLabelled.has(d.id)) ? null : "none");
+    });
+c.root.call(zoom);</code></pre>
+    <ul>
+        <li><strong>The <code>inv = 1 / k</code> trick.</strong> The group scale and the per-mark
+            counter-scale cancel, so a circle drawn at <code>r * inv</code> inside a group scaled by
+            <code>k</code> renders at exactly <code>r</code> screen pixels — constant at every zoom
+            level. The same applies to a label's <em>offset</em>: counter-scale its <code>dy</code>
+            by <code>inv</code> too, otherwise the gap above the node grows with <code>k</code> and
+            the label drifts away from its dot as you zoom in.</li>
+        <li><strong>Why not <code>vector-effect: non-scaling-stroke</code>?</strong> That handles
+            strokes only — not radii or font sizes. The <code>1 / k</code> rewrite covers all three
+            uniformly with one number.</li>
+        <li><strong>Zoom-gated labels.</strong> <code>k &gt;= 1.5 || topLabelled.has(d.id)</code>:
+            zoomed out, only the dozen most-central characters keep their names; zoom past 1.5× and
+            everyone is labelled. This is the cartographer's idea of semantic zoom — more detail
+            emerges as you get closer.</li>
+    </ul>
+    <p>Wheel to zoom, drag the background to pan. Watch the dots and labels stay the same physical
+        size while the layout spreads out:</p>
+    <div class="container" id="demo-zoom"></div>
+    <p class="example-link"><a href="examples/11e/01-zoom-aware-labels.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <h2>2. Styled labels with <code>foreignObject</code></h2>
+    <p>SVG <code>&lt;text&gt;</code> is plain text: no background, no padding, no border-radius, no
+        drop shadow. For pill-shaped, coloured, polished labels we borrow HTML's box model by
+        embedding it inside the SVG with <code>&lt;foreignObject&gt;</code> wrapping an
+        <code>xhtml:div</code>:</p>
+    <pre><code>const fo = zoomG.selectAll("foreignObject").data(topNodes).join("foreignObject")
+    .attr("width", 110).attr("height", 22)
+    .style("pointer-events", "none");
+
+fo.append("xhtml:div")                         // xhtml: → parsed as HTML, CSS applies
+    .style("background", d =&gt; colour(d.community))
+    .style("color", "white")
+    .style("border-radius", "10px")
+    .style("padding", "1px 8px")
+    .style("box-shadow", "0 1px 2px rgba(0,0,0,0.2)")
+    .text(d =&gt; d.id.replace(/-/g, " "));</code></pre>
+    <ul>
+        <li><strong>The <code>xhtml:</code> prefix matters.</strong> Without it the
+            <code>&lt;div&gt;</code> is created in the SVG namespace, where most CSS properties are
+            no-ops. The prefix puts it in the XHTML namespace so the browser lays it out as HTML.</li>
+        <li><strong>Positioning.</strong> A <code>foreignObject</code> is placed by its top-left
+            corner, so to centre a label above a node set
+            <code>x = node.x − W/2</code> and <code>y = node.y − H − r − 2</code> on every tick.</li>
+        <li><strong>Cost.</strong> Each <code>foreignObject</code> is a little HTML subtree the
+            browser must lay out on every move. Lovely for the dozen labels you actually want to
+            spotlight; do <em>not</em> do it for all 187 — there, plain <code>&lt;text&gt;</code> is
+            far cheaper.</li>
+    </ul>
+    <div class="container" id="demo-foreignobject"></div>
+    <p class="example-link"><a href="examples/11e/02-foreignobject-labels.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <h2>3. Performance at scale</h2>
+    <p>The GoT graph (187 nodes) never strains the browser, but the same SVG pipeline will start to
+        judder somewhere in the low thousands of nodes. Before reaching for a different renderer
+        (Canvas / WebGL) or a Web Worker (<a href="11f-web-workers.html">11f</a>), there are two
+        cheap, SVG-side levers worth knowing — and a third for when labels are present:</p>
+    <pre><code>// (1) tick budget — only repaint every Nth tick; the simulation still
+//     updates positions every tick, so motion stays smooth.
+const TICK_BUDGET = 2;
+let tickCount = 0;
+sim.on("tick", () =&gt; {
+    if (++tickCount % TICK_BUDGET) return;   // skip the paint this tick
+    link.attr("x1", …).attr("y1", …).attr("x2", …).attr("y2", …);
+    node.attr("cx", d =&gt; d.x).attr("cy", d =&gt; d.y);
+});
+
+// (2) idle freeze — once alpha &lt; alphaMin the simulation fires "end" and
+//     stops emitting ticks on its own; hook it to stop any extra work.
+sim.on("end", () =&gt; { /* layout is frozen — nothing left to repaint */ });
+
+// (3) label-on-demand — when every label is hidden (zoomed out), skip the
+//     per-tick label.attr("x", …) writes entirely.
+if (anyLabelVisible) label.attr("x", d =&gt; d.x).attr("y", d =&gt; d.y);</code></pre>
+    <ul>
+        <li><strong>Tick budget</strong> roughly halves DOM work for a one-character change. The
+            cost is jitterier motion — drag starts to feel less responsive above <code>~3</code>.</li>
+        <li><strong>Idle freeze</strong> is free: the simulation already stops ticking when it
+            cools, so the per-tick redraw cost drops to zero on its own. The demo below just reports
+            it (<em>"idle (frozen)"</em>).</li>
+        <li><strong>Label-on-demand</strong> matters once you have many labels — there is nothing
+            to position when they are all hidden, so skip the writes. (The demo below has no labels,
+            so it shows only the first two levers.)</li>
+    </ul>
+    <p>The counter below splits <em>simulation ticks/s</em> from <em>painted fps</em> so the tick
+        budget's effect is visible: the simulation ticks at the monitor's ceiling while painted frames
+        land at roughly half that (one paint per two ticks), until the layout cools:</p>
+    <div class="container" id="demo-perf"></div>
+    <p class="example-link"><a href="examples/11e/03-perf-and-scale.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <div class="note"><strong>Takeaway.</strong> These three techniques are about <em>fit and
+        finish</em>, not new structure. Semantic zoom (group transform + <code>1/k</code>
+        counter-scale + zoom-gated labels) keeps the view legible at any scale;
+        <code>foreignObject</code> buys HTML typography for a curated label set; the tick budget and
+        idle freeze stretch how far plain SVG carries you. When SVG finally runs out of road, the
+        next move is to take the simulation off the main thread — <a href="11f-web-workers.html">11f</a>.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://github.com/d3/d3-zoom" target="_blank">d3-zoom</a> — the zoom behaviour
+            and its transform object.</li>
+        <li><a href="https://developer.mozilla.org/en-US/docs/Web/SVG/Element/foreignObject"
+            target="_blank">MDN — <code>foreignObject</code></a></li>
+        <li><a href="https://observablehq.com/@d3/force-directed-graph-canvas" target="_blank">Observable —
+            force-directed graph (Canvas)</a>, the next step when SVG runs out of road.</li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="11d-encoding-and-zoom.html">← 11d — Encoding and overlays</a> ·
+        <a href="index.html">L11 index</a> ·
+        <a href="11f-web-workers.html">11f — Web Worker simulation →</a></p>
+
+    <script>
+        const DATA_URL = "./datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+            const cloneGraph = () => ({
+                nodes: raw.nodes.map(d => ({ ...d })),
+                links: raw.links.map(d => ({ ...d }))
+            });
+            const baseOpts = { margin: { top: 10, right: 10, bottom: 10, left: 10 } };
+
+            // ============================================================
+            // §1. semantic zoom — zoom-invariant sizing + zoom-gated labels
+            // ============================================================
+            {
+                const c = makeCanvas("#demo-zoom", 600, { ...baseOpts, pan: false });
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+                const topLabelled = new Set(
+                    [...nodes].sort((a, b) => b.bc - a.bc).slice(0, 12).map(d => d.id));
+
+                const zoomG = c.plot.append("g");
+                const link = zoomG.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line");
+                const node = zoomG.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1);
+                const label = zoomG.append("g")
+                    .selectAll("text").data(nodes).join("text")
+                    .attr("text-anchor", "middle").attr("dy", d => -(r(d.bc) + 4))
+                    .style("font-size", "12px").style("pointer-events", "none")
+                    .style("paint-order", "stroke")
+                    .style("stroke", "white").style("stroke-width", 3)
+                    .style("fill", "#222")
+                    .text(d => d.id.replace(/-/g, " "));
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                        label.attr("x", d => d.x).attr("y", d => d.y);
+                    });
+                attachWarmup(c.root, sim);
+
+                const zoom = d3.zoom().scaleExtent([0.3, 8])
+                    .on("zoom", event => {
+                        const k = event.transform.k, inv = 1 / k;
+                        zoomG.attr("transform", event.transform);
+                        node.attr("r", d => r(d.bc) * inv).attr("stroke-width", inv);
+                        link.attr("stroke-width", inv);
+                        label.attr("dy", d => -(r(d.bc) + 4) * inv)   // keep a constant screen-px gap
+                            .style("display", d =>
+                                (k >= 1.5 || topLabelled.has(d.id)) ? null : "none")
+                            .style("font-size", `${12 * inv}px`)
+                            .style("stroke-width", 3 * inv);
+                    });
+                c.root.call(zoom);
+                label.style("display", d => topLabelled.has(d.id) ? null : "none");
+            }
+
+            // ============================================================
+            // §2. foreignObject styled labels
+            // ============================================================
+            {
+                const c = makeCanvas("#demo-foreignobject", 600, baseOpts);
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+                const topNodes = [...nodes].sort((a, b) => b.bc - a.bc).slice(0, 12);
+
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+
+                const W = 110, H = 22;
+                const fo = wrap.append("g")
+                    .selectAll("foreignObject").data(topNodes).join("foreignObject")
+                    .attr("width", W).attr("height", H)
+                    .style("pointer-events", "none");
+                fo.append("xhtml:div")
+                    .style("background", d => colour(d.community))
+                    .style("color", "white")
+                    .style("border-radius", "10px")
+                    .style("padding", "1px 8px")
+                    .style("font-size", "11px")
+                    .style("font-family", "-apple-system, BlinkMacSystemFont, sans-serif")
+                    .style("text-align", "center")
+                    .style("white-space", "nowrap")
+                    .style("box-shadow", "0 1px 2px rgba(0,0,0,0.2)")
+                    .text(d => d.id.replace(/-/g, " "));
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                        fo.attr("x", d => d.x - W / 2)
+                          .attr("y", d => d.y - H - r(d.bc) - 2);
+                    });
+                attachWarmup(c.root, sim);
+            }
+
+            // ============================================================
+            // §3. perf and scale instrumentation
+            // ============================================================
+            {
+                const c = makeCanvas("#demo-perf", 600, baseOpts);
+                const { nodes, links } = cloneGraph();
+                const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+                nodes.forEach(d => d.__r = r(d.bc));
+
+                const fpsLabel = c.root.append("text")
+                    .attr("x", 8).attr("y", 16)
+                    .style("font", "11px ui-monospace, monospace")
+                    .style("fill", "#555");
+                let lastT = performance.now(), simTicks = 0, paints = 0;
+                function bump(painted) {
+                    simTicks++;
+                    if (painted) paints++;
+                    const now = performance.now();
+                    if (now - lastT >= 500) {
+                        const tps = (simTicks * 1000 / (now - lastT)).toFixed(0);
+                        const fps = (paints * 1000 / (now - lastT)).toFixed(0);
+                        fpsLabel.text(`sim ticks/s: ${tps}  ·  painted fps: ${fps}`);
+                        simTicks = 0; paints = 0; lastT = now;
+                    }
+                }
+
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.5)
+                    .selectAll("line").data(links).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const node = wrap.append("g")
+                    .selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+
+                const TICK_BUDGET = 2;
+                let tickCount = 0;
+
+                const sim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
+                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .on("tick", () => {
+                        if (++tickCount % TICK_BUDGET) { bump(false); return; }
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                        bump(true);
+                    });
+                sim.on("end.freeze", () => fpsLabel.text("idle (frozen)"));
+                attachWarmup(c.root, sim);
+            }
+        });
+    </script>
+</body>
+
+</html>

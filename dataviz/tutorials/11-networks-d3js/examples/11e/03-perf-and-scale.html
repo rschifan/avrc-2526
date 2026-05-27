@@ -3,26 +3,27 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11f — Stage 6: perf and scale instrumentation</title>
+    <title>11e §3 — perf and scale instrumentation</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
 </head>
 
 <body>
-    <h1>11f — Stage 6: Perf and scale instrumentation</h1>
-    <p class="lead">An FPS counter and three throttling knobs — the first optimizations to reach
-        for before switching renderer. With 187 nodes it's overkill; the point is to see the
+    <h1>11e §3 — Perf and scale instrumentation</h1>
+    <p class="lead">An FPS counter and the SVG-side throttling knobs — the first optimizations to
+        reach for before switching renderer. With 187 nodes it's overkill; the point is to see the
         knobs so you can apply them at 2000.
-        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+        <a href="../../11e-rendering-and-scale.html">Source tutorial &rarr;</a>
     </p>
 
     <div class="note">
-        <h3>What this stage adds (vs the previous stage)</h3>
-        <p>Three SVG-side performance levers, in order of impact: a <em>tick budget</em>
-            (don't repaint every tick), <em>idle freeze</em> (stop work once cool), and
-            <em>label-on-demand</em> (only update labels when at least one is visible). Each
-            buys you ~2× the workload before SVG starts to choke.
+        <h3>What this example shows</h3>
+        <p>Two SVG-side performance levers, in order of impact: a <em>tick budget</em>
+            (don't repaint every tick) and <em>idle freeze</em> (stop work once cool). A third —
+            <em>label-on-demand</em> (skip per-tick label updates when none are visible) — applies
+            once a view has labels; this demo has none, so it shows the first two. Each lever buys
+            roughly 2× the workload before SVG starts to choke.
         </p>
         <ul>
             <li><strong>Tick budget</strong>: <code>if (++tickCount % N) return;</code> skips
@@ -32,9 +33,9 @@
             <li><strong>Idle freeze</strong>: once <code>alpha &lt; alphaMin</code> the
                 simulation fires <code>"end"</code> and stops emitting ticks — so the FPS counter
                 naturally drops to zero. The overlay reads "idle (frozen)".</li>
-            <li><strong>Label-on-demand</strong>: when every label is hidden (e.g. zoomed out),
-                skip the <code>label.attr("x", …)</code> update. With 187 labels it saves a few
-                hundred attribute writes per tick.</li>
+            <li><strong>Label-on-demand</strong> (for a labelled view, not exercised here): when
+                every label is hidden (e.g. zoomed out), skip the <code>label.attr("x", …)</code>
+                update. With 187 labels that saves a few hundred attribute writes per tick.</li>
             <li><strong><code>vector-effect: non-scaling-stroke</code></strong>: lets you scale
                 the wrapper <code>&lt;g&gt;</code> without recomputing per-element stroke widths.
                 Used by every L11 example; mention here because in a pure-perf context it's a
@@ -42,7 +43,7 @@
             <li><strong>What this is <em>not</em></strong>: a quadtree-aware spatial index, a
                 different renderer (Canvas / WebGL), or a Web Worker offload — those are bigger
                 changes.
-                <a href="../11h/01-worker-simulation.html">11h</a> shows the Worker option; the
+                <a href="../11f/01-worker-simulation.html">11f</a> shows the Worker option; the
                 numbers below show where the simple SVG pipeline starts to struggle.
             </li>
             <li><strong>How to read the FPS counter</strong>: 60 = monitor refresh ceiling. On
@@ -119,10 +120,10 @@
     </script>
 
     <nav class="example-nav">
-        <a href="05-foreignobject-labels.html">&larr; Prev: foreignObject labels</a>
+        <a href="02-foreignobject-labels.html">&larr; Prev: §2 foreignObject labels</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="07-cluster-forces.html">Next: stage 7 — cluster forces &rarr;</a>
+        <a href="../11f/01-worker-simulation.html">Next: 11f — Web Worker simulation &rarr;</a>
     </nav>
 </body>
 

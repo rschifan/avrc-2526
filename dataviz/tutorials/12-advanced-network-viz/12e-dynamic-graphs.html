@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12e — Dynamic and streaming graphs</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="./_shared/chart.js?v=3"></script>
+    <link rel="stylesheet" href="./_shared/chart.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script>document.addEventListener("DOMContentLoaded", () => hljs.highlightAll());</script>
+    <style>
+        .ctrl { display: flex; gap: 0.8em; align-items: center; flex-wrap: wrap;
+                margin: 0.6em 0; font-size: var(--text-md); }
+        .stats { color: #555; font-variant-numeric: tabular-nums; }
+        .caption { color: #555; font-style: italic; margin: 0.5em 0 0.2em; min-height: 1.3em; }
+        .timeline-btn { padding: 0.3em 0.8em; }
+        .timeline-btn.active { background: #0072B2; color: white; border-color: #0072B2; }
+    </style>
+</head>
+
+<body>
+    <h1>12e — Dynamic and streaming graphs</h1>
+    <p class="lead">Every L11 network was static — load the JSON, run the simulation, never touch the
+        data again. But the interesting graphs are rarely still: friendships form, papers cite each
+        other, transactions fire, servers join and leave. A <strong>dynamic graph</strong> visualization
+        animates that change, and the animation itself carries information a static snapshot cannot —
+        the <em>order</em> in which structure appeared, and how it grew. This tutorial builds two
+        production patterns on top of the L11 force layout: <strong>streaming</strong> (the graph grows
+        one event at a time) and <strong>snapshots</strong> (the whole graph swaps between known states).</p>
+
+    <h2>1. Why animate a changing graph?</h2>
+    <p>A still picture of a network answers "what is connected to what". Showing the network <em>evolve</em>
+        answers questions a single frame cannot:</p>
+    <ul>
+        <li><strong>Social &amp; collaboration networks.</strong> Follows, friendships, and co-authorships
+            accumulate over time. Animation shows <em>when</em> communities crystallise and which early
+            members become the bridges between them.</li>
+        <li><strong>Citation &amp; knowledge graphs.</strong> As papers and entities link up, a few
+            seminal nodes attract far more connections than the rest — you can literally watch the
+            <em>hubs emerge</em> (the demo in §4 reproduces exactly this effect).</li>
+        <li><strong>Live monitoring.</strong> Network traffic, payments, or message flows arrive as a
+            stream of edges. A dynamic view surfaces bursts and anomalies <em>as they happen</em>, not in
+            a next-day report.</li>
+        <li><strong>Infrastructure &amp; systems.</strong> Service meshes and device topologies gain and
+            lose nodes constantly; animating the churn makes a cascading failure visible as it spreads.</li>
+    </ul>
+    <p>The throughline: motion encodes <strong>sequence, emergence, and churn</strong>. The engineering
+        problem is to make that motion <em>legible</em> — surviving nodes must stay put so the eye can
+        track them, while new and departing nodes animate in and out. That is almost entirely a
+        <strong>data-join</strong> problem, which is why the L10/L11 join is the foundation here.</p>
+
+    <h2>2. Three flavours of "dynamic"</h2>
+    <p>"Dynamic graph" is an umbrella; the right code depends on which sub-pattern you have:</p>
+    <table>
+        <thead><tr><th>Pattern</th><th>Source</th><th>Code shape</th></tr></thead>
+        <tbody>
+            <tr><td><strong>Streaming</strong></td>
+                <td>An event stream — a new node arrives, an edge appears, a node leaves.</td>
+                <td>Append to the <code>nodes</code> / <code>links</code> arrays; call
+                    <code>sim.nodes(nodes)</code>, rebuild <code>forceLink(links)</code>, restart at a
+                    moderate alpha.</td></tr>
+            <tr><td><strong>Snapshots</strong></td>
+                <td>Discrete time slices — mostly the same nodes, different edge sets, like yearly
+                    co-authorship networks.</td>
+                <td>Swap the entire arrays; rely on the <em>key function</em> in
+                    <code>selection.data(…, key)</code> so D3 matches surviving nodes to their old
+                    positions instead of restarting from zero.</td></tr>
+            <tr><td><strong>Continuous</strong></td>
+                <td>One running simulation, attribute updates only (no add/remove).</td>
+                <td>Mutate per-datum properties; let the <code>tick</code> handler pick up the new
+                    values. The force simulation is untouched.</td></tr>
+        </tbody>
+    </table>
+    <p>The first two need new mechanics; the third is just attribute updates and works out of the box.</p>
+
+    <h2>3. The core mechanic: keyed joins</h2>
+    <p>Static <code>data(arr).join(tag)</code> matches by index by default — element 0 binds to
+        <code>arr[0]</code>, element 1 to <code>arr[1]</code>, and so on. Add a node to the front of the
+        array and every existing circle is rebound to the wrong datum: positions scramble, colours jump.
+        The fix is a <strong>key function</strong> that ties each DOM element to a stable identity:</p>
+    <pre><code>const node = nodeG.selectAll("circle")
+    .data(nodes, d =&gt; d.id)            // ← key by id, not array position
+    .join(
+        enter  =&gt; enter.append("circle")
+            .attr("r", 0)                          // new arrivals grow in…
+            .call(e =&gt; e.transition().duration(400).attr("r", d =&gt; r(d.degree))),
+        update =&gt; update                           // survivors: leave position to the sim
+            .call(u =&gt; u.transition().duration(400).attr("r", d =&gt; r(d.degree))),
+        exit   =&gt; exit.transition().duration(400).attr("r", 0).remove()   // departures shrink out
+    );</code></pre>
+    <p>The three-callback form of <code>selection.join</code> (from 10a) maps one-to-one onto the three
+        things a changing graph does: <strong>enter</strong> nodes grow from <code>r = 0</code>;
+        <strong>update</strong> nodes keep their identity (the simulation owns their position, but we can
+        still re-encode size or colour as their data changes); <strong>exit</strong> nodes shrink and
+        remove themselves. Keep the simulation state on the <em>surviving</em> datum objects and the
+        layout never restarts from scratch — that stability is what makes the animation readable.</p>
+
+    <h2>4. Streaming — watch a network grow</h2>
+    <p>The most compelling thing a dynamic graph can show is <strong>structure emerging from a simple
+        rule</strong>. Our stream follows <strong>preferential attachment</strong> (the Barabási–Albert
+        model): every arriving node links to a few existing ones, choosing them with probability
+        proportional to how many connections they already have. "The rich get richer" — and a handful of
+        <strong>hubs</strong> pull away from the crowd. Watch the node size (it tracks degree) and the
+        <em>largest hub</em> counter as the graph grows.</p>
+
+    <p><strong>Step 1 — the model.</strong> The classic trick for a degree-weighted random pick is an
+        <code>endpoints</code> pool: every node id appears in it once per incident edge, so a
+        <em>uniform</em> draw from the pool is automatically proportional to degree.</p>
+    <pre><code>const M = 2;                 // edges each new node brings in
+const endpoints = [];        // node ids, repeated once per incident edge
+
+function addNode() {
+    const v = { id: nextId++, degree: 0 };
+    const targets = pickTargets(M);          // ∝ degree (preferential attachment)
+    nodes.push(v);
+    for (const t of targets) {
+        links.push({ source: v.id, target: t });
+        endpoints.push(v.id, t);             // grow the weighted pool
+        v.degree++; byId.get(t).degree++;
+    }
+    update(v.id);                            // redraw + reheat, flag the new arrival
+}
+
+function pickTargets(m) {
+    if (nodes.length &lt;= m) return nodes.map(n =&gt; n.id);   // bootstrap the seed
+    const chosen = new Set();
+    while (chosen.size &lt; m)
+        chosen.add(endpoints[Math.floor(Math.random() * endpoints.length)]);
+    return [...chosen];
+}</code></pre>
+
+    <p><strong>Step 2 — one <code>update()</code>.</strong> Every change runs the same four steps: hand
+        the new array to the simulation, <em>rebuild</em> the link force, reheat gently, and re-run the
+        keyed joins. The radius scale is re-domained on each call so the size encoding keeps pace with
+        the growing hubs.</p>
+    <pre><code>function update(newestId) {
+    r.domain([1, d3.max(nodes, d =&gt; d.degree) || 1]);     // degree → radius
+    sim.nodes(nodes);                                      // tell the sim about new nodes
+    sim.force("link", d3.forceLink(links).id(d =&gt; d.id).distance(30));  // rebuild, don't mutate
+    sim.alpha(0.5).restart();                              // gentle reheat, not 1.0
+
+    node = nodeG.selectAll("circle").data(nodes, d =&gt; d.id).join(/* enter / update / exit */);
+    link = linkG.selectAll("line")
+        .data(links, l =&gt; `${l.source.id ?? l.source}-${l.target.id ?? l.target}`)
+        .join(/* … */);
+    pulse(newestId);                                       // flash the arrival
+}</code></pre>
+
+    <p>Three details worth internalising:</p>
+    <ul>
+        <li><strong>Rebuild the link force, don't mutate it.</strong> <code>forceLink</code> captures the
+            array at construction; appending to it afterwards is a no-op until you attach a fresh
+            <code>forceLink(links)</code>. It is cheap — do it on every update.</li>
+        <li><strong>Reheat with a small alpha</strong> (≈ 0.5), never 1.0. The layout is mostly settled;
+            you only need a nudge to absorb the newcomer. Full reheats look explosive.</li>
+        <li><strong>Key the link join too.</strong> Lines are keyed by a derived
+            <code>source-target</code> string, so existing edges are left alone and only genuine
+            additions animate in.</li>
+    </ul>
+
+    <div class="ctrl">
+        <button id="stream-toggle">Pause</button>
+        <button id="stream-step">Add one node</button>
+        <button id="stream-reset">Reset</button>
+        <span id="stream-stats" class="stats">—</span>
+    </div>
+    <div class="container" id="demo-stream"></div>
+    <p class="caption">New arrivals flash orange; node size and shade track degree. Watch a few early
+        nodes capture a disproportionate share of new links and balloon into hubs, while most nodes stay
+        sparsely connected — the rich-get-richer dynamic of preferential attachment. A static snapshot
+        would show the hubs; only the animation shows how they got that way.</p>
+    <p class="example-link"><a href="examples/12e/01-streaming-additions.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <h2>5. Snapshots — replay a timeline</h2>
+    <p>The second pattern handles discrete <em>states</em>, each with its own node and edge set that
+        share most members — a research group sampled once a year, say. We want each transition to
+        <em>preserve</em> the positions of nodes present in both frames, fade in newcomers, and fade out
+        anyone who left, so the eye can follow who stayed and who moved.</p>
+    <p>The mechanism is the same key-by-id join — D3 matches surviving nodes by id, the simulation keeps
+        their <code>x</code> / <code>y</code>, and only enter/exit nodes get fresh positions:</p>
+    <pre><code>function snapshot(state) {
+    // carry previous x/y onto surviving ids so the layout continues, not restarts
+    nodes = state.nodes.map(d =&gt; Object.assign(byId.get(d.id) ?? {}, d));
+    links = state.links.map(l =&gt; ({ ...l }));
+    byId = new Map(nodes.map(d =&gt; [d.id, d]));
+
+    node = nodeG.selectAll("circle").data(nodes, d =&gt; d.id).join(/* enter / update / exit */);
+    link = linkG.selectAll("line").data(links, l =&gt; `${l.source}-${l.target}`).join(/* … */);
+
+    sim.nodes(nodes);
+    sim.force("link", d3.forceLink(links).id(d =&gt; d.id).distance(40));
+    sim.alpha(0.4).restart();
+}</code></pre>
+    <p>The <code>byId</code> map is the crux: it carries each surviving node's <em>previous</em>
+        <code>x</code> / <code>y</code> across the swap. Without it the simulation would re-seed every
+        node at the centre on every frame and the whole layout would jump; with it you get smooth
+        move-in / move-out and a stable mental map across the timeline.</p>
+
+    <p>Three yearly snapshots of a small research group. Step through them, or press <strong>Play</strong>
+        to watch the evolution end to end:</p>
+    <div class="ctrl">
+        <button class="timeline-btn active" data-t="0">Year 1</button>
+        <button class="timeline-btn" data-t="1">Year 2</button>
+        <button class="timeline-btn" data-t="2">Year 3</button>
+        <button id="snap-play">▶ Play</button>
+    </div>
+    <div class="container" id="demo-snapshots"></div>
+    <p class="caption" id="snap-caption">—</p>
+    <p class="example-link"><a href="examples/12e/02-snapshots.html" target="_blank" rel="noopener">↗ example</a></p>
+
+    <h2>6. Performance and reheating</h2>
+    <p>Dynamic graphs are harder than static ones because every change reheats the simulation, and
+        reheats are the most expensive moments of a force layout. Three knobs matter more here than for
+        static graphs:</p>
+    <ul>
+        <li><strong>Reheat with a small alpha.</strong> <code>sim.alpha(0.3).restart()</code> instead of
+            <code>sim.alpha(1)</code> when the graph is mostly stable. Use
+            <code>alphaTarget(0.05)</code> for an "always-warm" mode that keeps a live stream gently
+            flexible without ever fully cooling.</li>
+        <li><strong>Cool to zero when input stops.</strong> The drag pattern from 11c uses
+            <code>alphaTarget(0).restart()</code> on <code>end</code>; do the same after the last event
+            so the CPU goes idle instead of spinning on an already-settled layout.</li>
+        <li><strong>Batch high-rate streams.</strong> If events arrive faster than the simulation can
+            absorb them, collect for ~100 ms and call <code>update()</code> once per batch. The eye gets
+            a readable rhythm and the simulation gets stable ticks between rebuilds.</li>
+    </ul>
+
+    <h2>7. Beyond force-directed</h2>
+    <p>The snapshot pattern composes with any L12 layout, not just force-directed:</p>
+    <ul>
+        <li><strong>Adjacency matrix</strong> (<a href="12a-adjacency-matrix.html">12a</a>) — the
+            cleanest case. Cells are positions and rows/cols are ordered by some attribute; when the
+            graph updates you re-bind cells with a join keyed by <code>(source, target)</code>. No
+            simulation to reheat — the data join plus a row/col reorder transition is enough.</li>
+        <li><strong>Chord diagram</strong> (<a href="12b-chord-diagram.html">12b</a>) — ribbons
+            interpolate smoothly between weight matrices via a <code>d3.transition</code> on the
+            <code>d3.ribbon</code> path.</li>
+        <li><strong>Sankey</strong> (<a href="12c-sankey.html">12c</a>) — positions are laid out per
+            snapshot; transitions animate <code>x0</code> / <code>x1</code> / <code>y0</code> /
+            <code>y1</code> on each rect.</li>
+    </ul>
+    <p>The common thread: <em>matrix- or layout-shaped data is easier to animate honestly than a
+        force-directed view</em>, because positions are deterministic functions of the data. Force
+        layouts are stable across small changes but jitter under large ones — which is exactly why the
+        keyed join and the gentle reheat matter so much.</p>
+
+    <div class="note"><strong>Takeaway.</strong> A dynamic graph is a static graph plus a
+        <strong>keyed join</strong> and a <strong>thoughtful reheat</strong>. Streaming appends one
+        element per event and nudges the layout; snapshots swap the whole data set but preserve positions
+        for survivors. Encode the thing that is changing (here, degree → size) so the <em>process</em>
+        becomes visible — that is what turns a moving picture into an explanation.</div>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://observablehq.com/@d3/modifying-a-force-directed-graph" target="_blank">Observable
+            — Modifying a force-directed graph</a> (Mike Bostock — the canonical add/remove-node pattern)</li>
+        <li><a href="https://observablehq.com/@d3/temporal-force-directed-graph" target="_blank">Observable
+            — Temporal force-directed graph</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Barab%C3%A1si%E2%80%93Albert_model" target="_blank">The
+            Barabási–Albert model</a> — preferential attachment and scale-free networks (the §4 demo)</li>
+        <li><a href="https://www.sciencedirect.com/topics/computer-science/dynamic-graph-visualization"
+               target="_blank">Beck et al. — A taxonomy and survey of dynamic graph visualization</a></li>
+    </ul>
+
+    <p class="tutorial-nav"><a href="12d-edge-bundling.html">← 12d — Edge bundling</a> ·
+        <a href="index.html">L12 index</a> ·
+        <a href="12f-ecosystem.html">12f — Beyond D3 →</a></p>
+
+    <script>
+        // ============================================================
+        // §4. streaming demo — preferential attachment (Barabási–Albert)
+        // ============================================================
+        {
+            const c = makeCanvas("#demo-stream", 480,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const M = 2;                       // edges each arrival brings
+            const r = d3.scaleSqrt().domain([1, 1]).range([4, 20]).clamp(true);
+            const fillFor = d => {
+                const maxDeg = r.domain()[1] || 1;
+                return d3.interpolateBlues(0.35 + 0.55 * (d.degree / maxDeg));
+            };
+
+            let nodes, links, byId, endpoints, nextId, timer = null, paused = false;
+
+            const linkG = c.plot.append("g").attr("stroke", "#aaa").attr("stroke-opacity", 0.4);
+            const nodeG = c.plot.append("g");
+            let link = linkG.selectAll("line"), node = nodeG.selectAll("circle");
+
+            const sim = d3.forceSimulation([])
+                .force("link", d3.forceLink([]).id(d => d.id).distance(30))
+                .force("charge", d3.forceManyBody().strength(-90))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.05))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.05))
+                .force("collide", d3.forceCollide(d => r(d.degree) + 1))
+                .alphaDecay(0.04)
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+
+            function pickTargets(m) {
+                if (nodes.length <= m) return nodes.map(n => n.id);
+                const chosen = new Set();
+                while (chosen.size < m)
+                    chosen.add(endpoints[Math.floor(Math.random() * endpoints.length)]);
+                return [...chosen];
+            }
+
+            function pulse(id) {
+                nodeG.selectAll("circle").filter(d => d.id === id)
+                    .attr("stroke", "#D55E00").attr("stroke-width", 3.5)
+                    .transition("pulse").duration(900)
+                    .attr("stroke", "#fff").attr("stroke-width", 1.2);
+            }
+
+            function update(newestId) {
+                r.domain([1, d3.max(nodes, d => d.degree) || 1]);
+                sim.nodes(nodes);
+                sim.force("link", d3.forceLink(links).id(d => d.id).distance(30));
+                sim.force("collide", d3.forceCollide(d => r(d.degree) + 1));
+                sim.alpha(0.5).restart();
+
+                link = linkG.selectAll("line")
+                    .data(links, l => `${l.source.id ?? l.source}-${l.target.id ?? l.target}`)
+                    .join(
+                        e => e.append("line").attr("stroke-opacity", 0)
+                              .call(t => t.transition().duration(400).attr("stroke-opacity", 0.4)),
+                        u => u,
+                        x => x.transition().duration(300).attr("stroke-opacity", 0).remove()
+                    );
+                node = nodeG.selectAll("circle")
+                    .data(nodes, d => d.id)
+                    .join(
+                        e => e.append("circle").attr("r", 0)
+                              .attr("fill", fillFor)
+                              .attr("stroke", "#fff").attr("stroke-width", 1.2)
+                              .call(t => t.transition().duration(400)
+                                  .attr("r", d => r(d.degree))),
+                        u => u.call(t => t.transition().duration(400)
+                              .attr("r", d => r(d.degree)).attr("fill", fillFor)),
+                        x => x.transition().duration(300).attr("r", 0).remove()
+                    );
+
+                const maxDeg = d3.max(nodes, d => d.degree) || 0;
+                d3.select("#stream-stats")
+                    .text(`${nodes.length} nodes · ${links.length} links · largest hub: ${maxDeg} links`);
+
+                pulse(newestId);                                   // flash the new arrival
+            }
+
+            function addNode() {
+                const v = { id: nextId++, degree: 0 };
+                const targets = pickTargets(M);
+                nodes.push(v);
+                byId.set(v.id, v);
+                for (const t of targets) {
+                    links.push({ source: v.id, target: t });
+                    endpoints.push(v.id, t);
+                    v.degree++; byId.get(t).degree++;
+                }
+                update(v.id);
+            }
+
+            function reset() {
+                nodes = []; links = []; byId = new Map(); endpoints = []; nextId = 0;
+                update(null);
+                for (let i = 0; i < 4; i++) addNode();   // a small seed to start from
+            }
+            function start() { if (!timer) timer = d3.interval(addNode, 700); }
+            function stop() { if (timer) { timer.stop(); timer = null; } }
+
+            reset();
+            start();
+
+            document.getElementById("stream-toggle").addEventListener("click", function () {
+                paused = !paused;
+                this.textContent = paused ? "Resume" : "Pause";
+                paused ? stop() : start();
+            });
+            document.getElementById("stream-step").addEventListener("click", addNode);
+            document.getElementById("stream-reset").addEventListener("click", () => {
+                reset();
+                if (!paused) start();
+            });
+        }
+
+        // ============================================================
+        // §5. snapshot demo — a research group over three years
+        // ============================================================
+        {
+            const c = makeCanvas("#demo-snapshots", 460,
+                { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const SNAPS = [
+                {
+                    nodes: ["A", "B", "C", "D", "E"].map((id, i) => ({ id, group: i < 3 ? 0 : 1 })),
+                    links: [["A", "B"], ["B", "C"], ["A", "C"], ["D", "E"], ["C", "D"]]
+                        .map(([s, t]) => ({ source: s, target: t }))
+                },
+                {
+                    nodes: ["A", "B", "C", "D", "E", "F", "G", "H", "I"].map(id =>
+                        ({ id, group: ["A", "B", "C", "F", "G"].includes(id) ? 0 : 1 })),
+                    links: [
+                        ["A", "B"], ["B", "C"], ["A", "C"], ["A", "F"], ["F", "G"], ["C", "G"],
+                        ["D", "E"], ["E", "H"], ["D", "H"], ["H", "I"], ["E", "I"]
+                    ].map(([s, t]) => ({ source: s, target: t }))
+                },
+                {
+                    nodes: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"].map(id =>
+                        ({ id, group: ["A", "B", "C"].includes(id) ? 0
+                                    : ["D", "E", "F", "H", "I"].includes(id) ? 1 : 2 })),
+                    links: [
+                        ["A", "B"], ["B", "C"], ["A", "C"],
+                        ["D", "E"], ["D", "F"], ["E", "F"], ["E", "H"], ["H", "I"], ["F", "I"],
+                        ["G", "J"], ["J", "K"], ["G", "K"], ["C", "G"]
+                    ].map(([s, t]) => ({ source: s, target: t }))
+                }
+            ];
+            const CAPS = [
+                "Year 1 — a small core forms: two tight triangles linked by a single bridge (C–D).",
+                "Year 2 — both clusters densify and grow; new members attach to whoever is already central.",
+                "Year 3 — a third community (G, J, K) splits off, and member F switches allegiance."
+            ];
+
+            const linkG = c.plot.append("g").attr("stroke", "#aaa").attr("stroke-opacity", 0.45);
+            const nodeG = c.plot.append("g");
+            let link = linkG.selectAll("line"), node = nodeG.selectAll("circle");
+
+            let byId = new Map();
+            let nodes = [], links = [];
+
+            const sim = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(40))
+                .force("charge", d3.forceManyBody().strength(-120))
+                .force("x", d3.forceX(c.innerW / 2).strength(0.06))
+                .force("y", d3.forceY(c.innerH / 2).strength(0.06))
+                .force("collide", d3.forceCollide(10))
+                .alphaDecay(0.03)
+                .on("tick", () => {
+                    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    node.attr("cx", d => d.x).attr("cy", d => d.y);
+                });
+
+            function snapshot(t) {
+                const snap = SNAPS[t];
+                nodes = snap.nodes.map(d => Object.assign(byId.get(d.id) ?? {}, d));
+                links = snap.links.map(l => ({ ...l }));
+                byId = new Map(nodes.map(d => [d.id, d]));
+
+                sim.nodes(nodes);
+                sim.force("link", d3.forceLink(links).id(d => d.id).distance(40));
+                sim.alpha(0.4).restart();   // gentle reheat — survivors keep their positions
+
+                link = linkG.selectAll("line")
+                    .data(links, l => `${l.source.id ?? l.source}-${l.target.id ?? l.target}`)
+                    .join(
+                        e => e.append("line").attr("stroke-opacity", 0)
+                              .call(tr => tr.transition().duration(500).attr("stroke-opacity", 0.45)),
+                        u => u,
+                        x => x.transition().duration(400).attr("stroke-opacity", 0).remove()
+                    );
+                node = nodeG.selectAll("circle")
+                    .data(nodes, d => d.id)
+                    .join(
+                        e => e.append("circle").attr("r", 0)
+                              .attr("fill", d => colour(d.group))
+                              .attr("stroke", "white").attr("stroke-width", 1.5)
+                              .call(tr => tr.transition().duration(500).attr("r", 12)),
+                        u => u.call(tr => tr.transition().duration(500).attr("fill", d => colour(d.group))),
+                        x => x.transition().duration(400).attr("r", 0).remove()
+                    );
+
+                d3.select("#snap-caption").text(CAPS[t]);
+                d3.selectAll(".timeline-btn").classed("active", function () {
+                    return +this.dataset.t === t;
+                });
+            }
+
+            snapshot(0);
+            d3.selectAll(".timeline-btn").on("click", function () {
+                snapshot(+this.dataset.t);
+            });
+            document.getElementById("snap-play").addEventListener("click", () => {
+                let t = 0;
+                snapshot(0);
+                const iv = d3.interval(() => {
+                    t++;
+                    if (t >= SNAPS.length) { iv.stop(); return; }
+                    snapshot(t);
+                }, 1600);
+            });
+        }
+    </script>
+</body>
+
+</html>

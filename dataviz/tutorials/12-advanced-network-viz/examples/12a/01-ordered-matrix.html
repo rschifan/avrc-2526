@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12a — ordered adjacency matrix</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>12a — Ordered adjacency matrix</h1>
+    <p class="lead">The top-40 Game-of-Thrones characters as an N × N matrix: one cell per edge,
+        coloured by weight. Switch the row/column ordering and watch community blocks appear.
+        <a href="../../12a-adjacency-matrix.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>Two encodings (see the legend).</strong> A cell's <em>fill</em> runs light →
+                dark with the edge <strong>weight</strong>; the thin <em>coloured strips</em> on the top
+                and left edges give each character its <strong>community</strong> colour, so the blocks
+                are framed without cluttering the cells.</li>
+            <li><strong>Ordering is the visualization.</strong> The matrix never changes — only the
+                index permutation does. <em>Alphabetical</em> scatters the cells; <em>by community</em>
+                and <em>barycenter</em> pull the dense blocks onto the diagonal.</li>
+            <li><strong>Barycenter reordering</strong> moves each row next to the weighted average
+                position of its neighbours; a few row→column passes and the blocks emerge from the data
+                alone, with no community labels.</li>
+            <li><strong>Row + column hover guides</strong> make the cross-reference effortless — the two
+                grey strips show which pair a cell belongs to, and the matching labels go bold.</li>
+        </ul>
+    </div>
+
+    <p>
+        <label><input type="radio" name="order" value="alpha"> alphabetical</label>
+        <label><input type="radio" name="order" value="community" checked> by community</label>
+        <label><input type="radio" name="order" value="centrality"> by centrality</label>
+        <label><input type="radio" name="order" value="barycenter"> barycenter</label>
+    </p>
+    <div id="matrix-legend"></div>
+    <div class="container" id="demo-matrix"></div>
+
+    <script>
+        const DATA_URL = "../../datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const TOP_N = 40;
+            const nodes = [...raw.nodes].sort((a, b) => b.bc - a.bc).slice(0, TOP_N);
+            const ids = new Set(nodes.map(d => d.id));
+            const links = raw.links.filter(l => ids.has(l.source) && ids.has(l.target));
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const idx = new Map(nodes.map((d, i) => [d.id, i]));
+            const N = nodes.length;
+            const M = Array.from({ length: N }, () => new Array(N).fill(0));
+            links.forEach(l => {
+                const i = idx.get(l.source), j = idx.get(l.target);
+                M[i][j] = l.weight; M[j][i] = l.weight;
+            });
+
+            // Cell colour: sequential blues on weight, interpolator floored at 0.3 so the
+            // lightest (weight-1) cells still read against the near-white background.
+            const minW = d3.min(links, l => l.weight);
+            const maxW = d3.max(links, l => l.weight);
+            const cellColour = d3.scaleSequential(t => d3.interpolateBlues(0.3 + 0.7 * t))
+                .domain([0, maxW]);
+
+            // legend — the matrix has no axes, so spell out both encodings
+            {
+                const comms = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+                const lg = d3.select("#matrix-legend").append("svg")
+                    .attr("viewBox", "0 0 460 46").attr("width", 460)
+                    .style("max-width", "100%").style("height", "auto")
+                    .style("display", "block").style("margin", "0.4em 0");
+                const grad = lg.append("defs").append("linearGradient").attr("id", "wgrad");
+                grad.selectAll("stop").data(d3.range(0, 1.001, 0.05)).join("stop")
+                    .attr("offset", d => `${d * 100}%`)
+                    .attr("stop-color", d => cellColour(minW + d * (maxW - minW)));
+                lg.append("text").attr("x", 0).attr("y", 11)
+                    .style("font-size", "var(--text-sm)").style("fill", "#444")
+                    .text("cell fill = edge weight (shared chapters)");
+                lg.append("rect").attr("x", 0).attr("y", 17).attr("width", 150).attr("height", 12)
+                    .attr("fill", "url(#wgrad)").attr("stroke", "#ccc");
+                lg.append("text").attr("x", 0).attr("y", 43)
+                    .style("font-size", "var(--text-sm)").style("fill", "#777").text(minW + " (weak)");
+                lg.append("text").attr("x", 150).attr("y", 43).attr("text-anchor", "end")
+                    .style("font-size", "var(--text-sm)").style("fill", "#777").text(maxW + " (strong)");
+                const cx0 = 250;
+                lg.append("text").attr("x", cx0).attr("y", 11)
+                    .style("font-size", "var(--text-sm)").style("fill", "#444")
+                    .text("edge strips = community");
+                comms.forEach((cm, i) =>
+                    lg.append("rect").attr("x", cx0 + i * 15).attr("y", 17)
+                        .attr("width", 12).attr("height", 12).attr("fill", colour(cm)));
+                lg.append("text").attr("x", cx0).attr("y", 43)
+                    .style("font-size", "var(--text-sm)").style("fill", "#777")
+                    .text("one colour per Louvain group");
+            }
+
+            const c = makeCanvas("#demo-matrix", 620,
+                { margin: { top: 110, right: 30, bottom: 20, left: 110 } });
+
+            const x = d3.scaleBand().range([0, c.innerW]).paddingInner(0.05);
+            const y = d3.scaleBand().range([0, c.innerH]).paddingInner(0.05);
+
+            const rowMarker = c.plot.append("rect")
+                .attr("x", -110).attr("width", c.innerW + 110)
+                .attr("height", 0).attr("fill", "#ffe9b3").attr("opacity", 0)
+                .style("pointer-events", "none");
+            const colMarker = c.plot.append("rect")
+                .attr("y", -110).attr("height", c.innerH + 110)
+                .attr("width", 0).attr("fill", "#ffe9b3").attr("opacity", 0)
+                .style("pointer-events", "none");
+
+            const cellG = c.plot.append("g");
+            const stripG = c.plot.append("g");   // community strips in the margins
+            const xLabelG = c.plot.append("g").attr("class", "x-labels");
+            const yLabelG = c.plot.append("g").attr("class", "y-labels");
+
+            function barycenterOrder() {
+                let perm = nodes.map((d, i) => i)
+                    .sort((a, b) => d3.descending(nodes[a].bc, nodes[b].bc));
+                for (let pass = 0; pass < 6; pass++) {
+                    const pos = new Map(perm.map((origIdx, newIdx) => [origIdx, newIdx]));
+                    const score = perm.map(i => {
+                        let num = 0, den = 0;
+                        for (let j = 0; j < N; j++) {
+                            if (M[i][j] > 0) {
+                                num += M[i][j] * pos.get(j);
+                                den += M[i][j];
+                            }
+                        }
+                        return den === 0 ? pos.get(i) : num / den;
+                    });
+                    perm = perm
+                        .map((i, k) => ({ i, s: score[k] }))
+                        .sort((a, b) => d3.ascending(a.s, b.s))
+                        .map(d => d.i);
+                }
+                return perm;
+            }
+
+            function order(mode) {
+                let perm;
+                if (mode === "alpha") {
+                    perm = nodes.map((d, i) => i)
+                        .sort((a, b) => d3.ascending(nodes[a].id, nodes[b].id));
+                } else if (mode === "community") {
+                    perm = nodes.map((d, i) => i)
+                        .sort((a, b) =>
+                            d3.ascending(nodes[a].community, nodes[b].community) ||
+                            d3.descending(nodes[a].bc, nodes[b].bc));
+                } else if (mode === "barycenter") {
+                    perm = barycenterOrder();
+                } else {
+                    perm = nodes.map((d, i) => i).sort((a, b) =>
+                        d3.descending(nodes[a].bc, nodes[b].bc));
+                }
+                const pos = new Map(perm.map((origIdx, newIdx) => [origIdx, newIdx]));
+                return { perm, pos };
+            }
+
+            function render(mode) {
+                const { perm } = order(mode);
+                const labels = perm.map(i => nodes[i].id);
+                x.domain(labels); y.domain(labels);
+
+                const cells = [];
+                for (let i = 0; i < N; i++)
+                    for (let j = 0; j < N; j++)
+                        if (M[i][j] > 0)
+                            cells.push({ i, j, v: M[i][j] });
+
+                const cell = cellG.selectAll("rect").data(cells, c => c.i + "_" + c.j)
+                    .join(enter => enter.append("rect").call(e => e.append("title")));
+
+                cell.select("title")
+                    .text(c => `${nodes[c.i].id.replace(/-/g, " ")} ↔ ${nodes[c.j].id.replace(/-/g, " ")}\nweight ${c.v}`);
+
+                cell.on("mouseenter", (e, c) => {
+                        rowMarker.attr("y", y(nodes[c.i].id))
+                            .attr("height", y.bandwidth()).attr("opacity", 0.35);
+                        colMarker.attr("x", x(nodes[c.j].id))
+                            .attr("width", x.bandwidth()).attr("opacity", 0.35);
+                        xLabelG.selectAll("text")
+                            .style("font-weight", t => t === nodes[c.j].id ? "bold" : null)
+                            .style("fill", t => t === nodes[c.j].id ? "#222" : "#666");
+                        yLabelG.selectAll("text")
+                            .style("font-weight", t => t === nodes[c.i].id ? "bold" : null)
+                            .style("fill", t => t === nodes[c.i].id ? "#222" : "#666");
+                    })
+                    .on("mouseleave", () => {
+                        rowMarker.attr("opacity", 0);
+                        colMarker.attr("opacity", 0);
+                        xLabelG.selectAll("text").style("font-weight", null).style("fill", "#666");
+                        yLabelG.selectAll("text").style("font-weight", null).style("fill", "#666");
+                    });
+
+                cell.transition().duration(500)
+                    .attr("x", c => x(nodes[c.j].id))
+                    .attr("y", c => y(nodes[c.i].id))
+                    .attr("width", x.bandwidth())
+                    .attr("height", y.bandwidth())
+                    .attr("fill", c => cellColour(c.v));   // fill = weight; community shown on the margins
+
+                // community strips along the margins (one tick per row / column)
+                const commOf = id => nodes[idx.get(id)].community;
+                stripG.selectAll("rect.row-strip").data(labels, d => d)
+                    .join("rect").attr("class", "row-strip")
+                    .attr("x", -6).attr("width", 4).attr("fill", d => colour(commOf(d)))
+                  .transition().duration(500)
+                    .attr("y", d => y(d)).attr("height", y.bandwidth());
+                stripG.selectAll("rect.col-strip").data(labels, d => d)
+                    .join("rect").attr("class", "col-strip")
+                    .attr("y", -6).attr("height", 4).attr("fill", d => colour(commOf(d)))
+                  .transition().duration(500)
+                    .attr("x", d => x(d)).attr("width", x.bandwidth());
+
+                xLabelG.selectAll("text").data(labels, d => d)
+                    .join("text")
+                    .attr("transform", d => `translate(${x(d) + x.bandwidth() / 2}, -10) rotate(-60)`)
+                    .attr("text-anchor", "start")
+                    .style("font-size", "var(--text-sm)")
+                    .style("fill", "#666")
+                    .text(d => d.replace(/-/g, " "));
+                yLabelG.selectAll("text").data(labels, d => d)
+                    .join("text")
+                    .attr("x", -10)
+                    .attr("y", d => y(d) + y.bandwidth() / 2)
+                    .attr("dy", 4)
+                    .attr("text-anchor", "end")
+                    .style("font-size", "var(--text-sm)")
+                    .style("fill", "#666")
+                    .text(d => d.replace(/-/g, " "));
+            }
+
+            render("community");
+            document.querySelectorAll('input[name="order"]').forEach(r =>
+                r.addEventListener("change", e => render(e.target.value)));
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="../12b/01-chord.html">Next: 12b chord diagram &rarr;</a>
+    </nav>
+</body>
+
+</html>

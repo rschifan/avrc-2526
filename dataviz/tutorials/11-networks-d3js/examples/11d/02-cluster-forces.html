@@ -3,28 +3,28 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11f — Stage 7: cluster forces (community-aware layout)</title>
+    <title>11d §3 — cluster forces (community-aware layout)</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
 </head>
 
 <body>
-    <h1>11f — Stage 7: Cluster forces (community-aware layout)</h1>
+    <h1>11d §3 — Cluster forces (community-aware layout)</h1>
     <p class="lead">A per-community <code>forceX</code> / <code>forceY</code> pulls each node
         toward its community's centroid. Communities separate <em>during</em> layout instead of
         being coloured after the fact. The state-of-the-art tuning that pure
         <code>forceCenter</code> gets wrong.
-        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a>
+        <a href="../../11d-encoding-and-zoom.html">Source tutorial &rarr;</a>
     </p>
 
     <div class="note">
-        <h3>What this stage adds (vs the previous stage)</h3>
+        <h3>What this example shows</h3>
         <p>One pair of forces — <code>forceX</code> and <code>forceY</code> with a
             <em>per-node target</em> derived from its community. Strength 0.08 is gentle enough
             that link springs and charge still shape the within-community geometry, but strong
             enough that communities visibly separate. Drop the strength to 0 and you're back to
-            the stage 3 layout; crank to 0.3 and communities become rigid blobs.
+            §2's blended layout; crank to 0.3 and communities become rigid blobs.
         </p>
         <ul>
             <li><strong>Target placement</strong>: each community gets a target point on a ring
@@ -37,7 +37,7 @@
                 each node aim at a <em>different</em> target. This is the modern idiom — a single
                 <code>forceX</code> with a varying target beats N separate forces.
             </li>
-            <li><strong>Why this is better than hulls</strong>: the hull view (11d §3) draws a
+            <li><strong>Why this is better than hulls</strong>: the hull view (11d §4) draws a
                 boundary around whatever the layout happens to produce. Cluster forces
                 <em>produce</em> the boundary by separating communities at simulation time. Less
                 visual machinery, more honest signal.
@@ -71,7 +71,7 @@
                 { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
             const nodes = raw.nodes.map(d => ({ ...d }));
             const links = raw.links.map(d => ({ ...d }));
-            const r = d3.scaleLinear().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
+            const r = d3.scaleSqrt().domain(d3.extent(nodes, d => d.bc)).range([3, 14]);
             nodes.forEach(d => d.__r = r(d.bc));
 
             const cks = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
@@ -81,6 +81,14 @@
                 x: c.innerW / 2 + rad * Math.cos(ang(i)),
                 y: c.innerH / 2 + rad * Math.sin(ang(i))
             }]));
+
+            // dashed markers for the community anchors — drawn first so they sit behind the graph
+            c.plot.append("g").selectAll("circle")
+                .data([...tgt.values()]).join("circle")
+                .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 5)
+                .attr("fill", "none").attr("stroke", "#999")
+                .attr("stroke-dasharray", "2,2")
+                .attr("vector-effect", "non-scaling-stroke");
 
             const link = c.plot.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.4)
                 .selectAll("line").data(links).join("line");
@@ -102,24 +110,14 @@
                     node.attr("cx", d => d.x).attr("cy", d => d.y);
                 });
             attachWarmup(c.root, sim);
-
-            // small target markers so students see the anchors
-            c.plot.append("g").selectAll("circle.tgt")
-                .data([...tgt.values()]).join("circle")
-                .attr("class", "tgt")
-                .attr("cx", d => d.x).attr("cy", d => d.y)
-                .attr("r", 3)
-                .attr("fill", "none")
-                .attr("stroke", "#999")
-                .attr("stroke-dasharray", "2,2");
         });
     </script>
 
     <nav class="example-nav">
-        <a href="06-perf-and-scale.html">&larr; Prev: perf and scale</a>
+        <a href="01-encoded-view.html">&larr; Prev: §1–§2 encoded view</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="../11h/01-worker-simulation.html">Next: 11h — Web Worker simulation &rarr;</a>
+        <a href="03-community-hulls.html">Next: §4 community hulls &rarr;</a>
     </nav>
 </body>
 

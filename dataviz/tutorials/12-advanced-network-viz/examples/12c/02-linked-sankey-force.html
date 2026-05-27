@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12c — linked Sankey + force views</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+    <style>
+        .faded   { opacity: 0.08 !important; }
+        .focus   { opacity: 1 !important; stroke-width: 2 !important; }
+        .tooltip { position: absolute; pointer-events: none; background: rgba(20,20,20,0.92);
+                   color: #fff; padding: 0.4em 0.6em; border-radius: 4px;
+                   font-size: 12px; line-height: 1.3; opacity: 0; transition: opacity 0.12s; }
+    </style>
+</head>
+
+<body>
+    <h1>12c — Linked Sankey + force views</h1>
+    <p class="lead">The same flow drawn two ways at once: a Sankey on top, a force-directed view of the
+        same nodes below, and a single hover handler that lights up the focal node and its edges in both
+        panels simultaneously. <a href="../../12c-sankey.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>One dispatcher, two views.</strong> A single <code>highlightAcross(node)</code>
+                toggles <code>.focus</code> / <code>.faded</code> classes on both the Sankey and the
+                force panel, so hovering either one highlights the same character everywhere.</li>
+            <li><strong>What each view gives up.</strong> The Sankey encodes stage order and
+                width = quantity; the force view encodes neither — it only balances springs, so the clean
+                three-stage structure collapses into a ball. That contrast is why Sankey exists for flow
+                data.</li>
+            <li><strong>Tooltip</strong> shows pre-computed in/out degree (summed edge value).</li>
+        </ul>
+    </div>
+
+    <div class="container" id="demo-sankey"></div>
+    <div class="container" id="demo-force"></div>
+    <div class="tooltip" id="tip"></div>
+
+    <script>
+        const data = {
+            nodes: [
+                { id: "Stark" },     { id: "Lannister" },  { id: "Targaryen" },
+                { id: "Loyalist" },  { id: "Defector"  },  { id: "Outsider"  },
+                { id: "Survives" },  { id: "Dies"      }
+            ],
+            links: [
+                { source: "Stark",     target: "Loyalist", value: 14 },
+                { source: "Stark",     target: "Defector", value:  4 },
+                { source: "Stark",     target: "Outsider", value:  2 },
+                { source: "Lannister", target: "Loyalist", value: 12 },
+                { source: "Lannister", target: "Defector", value:  6 },
+                { source: "Targaryen", target: "Defector", value:  9 },
+                { source: "Targaryen", target: "Outsider", value:  7 },
+                { source: "Loyalist", target: "Survives", value: 16 },
+                { source: "Loyalist", target: "Dies",     value: 10 },
+                { source: "Defector", target: "Survives", value:  8 },
+                { source: "Defector", target: "Dies",     value: 11 },
+                { source: "Outsider", target: "Survives", value:  6 },
+                { source: "Outsider", target: "Dies",     value:  3 }
+            ]
+        };
+
+        const colour = d3.scaleOrdinal(d3.schemeTableau10).domain(data.nodes.map(d => d.id));
+        const inDeg = d3.rollup(data.links, v => d3.sum(v, d => d.value), d => d.target);
+        const outDeg = d3.rollup(data.links, v => d3.sum(v, d => d.value), d => d.source);
+
+        const tip = d3.select("#tip");
+        function showTip(e, d) {
+            tip.style("opacity", 1)
+                .html(`<b>${d.id}</b><br>in: ${inDeg.get(d.id) ?? 0} · out: ${outDeg.get(d.id) ?? 0}`);
+        }
+        function moveTip(e) { tip.style("left", e.pageX + 12 + "px").style("top", e.pageY + 12 + "px"); }
+        function hideTip() { tip.style("opacity", 0); }
+
+        // ---- panel A: sankey ----
+        const sk = makeCanvas("#demo-sankey", 320,
+            { margin: { top: 16, right: 90, bottom: 16, left: 90 } });
+        const sankey = d3.sankey()
+            .nodeId(d => d.id)
+            .nodeWidth(16).nodePadding(14)
+            .nodeAlign(d3.sankeyJustify)
+            .extent([[0, 0], [sk.innerW, sk.innerH]]);
+        const { nodes: skN, links: skL } = sankey({
+            nodes: data.nodes.map(d => ({ ...d })),
+            links: data.links.map(d => ({ ...d }))
+        });
+
+        const sankeyLinks = sk.plot.append("g").attr("fill", "none").attr("stroke-opacity", 0.45)
+            .selectAll("path").data(skL).join("path")
+            .attr("d", d3.sankeyLinkHorizontal())
+            .attr("stroke", d => colour(d.source.id))
+            .attr("stroke-width", d => Math.max(1, d.width));
+
+        const sankeyNodes = sk.plot.append("g").selectAll("rect").data(skN).join("rect")
+            .attr("x", d => d.x0).attr("y", d => d.y0)
+            .attr("width", d => d.x1 - d.x0)
+            .attr("height", d => Math.max(1, d.y1 - d.y0))
+            .attr("fill", d => colour(d.id))
+            .attr("stroke", "white")
+            .style("cursor", "pointer")
+            .on("mouseenter", (e, d) => { showTip(e, d); highlightAcross(d); })
+            .on("mousemove", moveTip)
+            .on("mouseleave", () => { hideTip(); highlightAcross(null); });
+
+        sk.plot.append("g").selectAll("text").data(skN).join("text")
+            .attr("x", d => d.x0 < sk.innerW / 2 ? d.x1 + 6 : d.x0 - 6)
+            .attr("y", d => (d.y0 + d.y1) / 2)
+            .attr("dy", 4)
+            .attr("text-anchor", d => d.x0 < sk.innerW / 2 ? "start" : "end")
+            .style("font-size", "var(--text-md)")
+            .style("fill", "#333")
+            .text(d => d.id);
+
+        // ---- panel B: force-directed view of the same flow ----
+        const NODE_R = 14;
+        const fc = makeCanvas("#demo-force", 400,
+            { margin: { top: 12, right: 12, bottom: 24, left: 12 } });
+        const fNodes = data.nodes.map(d => ({ ...d, __r: NODE_R }));
+        const fLinks = data.links.map(d => ({ ...d }));
+
+        fc.root.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 9).attr("refY", 0)
+            .attr("markerUnits", "userSpaceOnUse")
+            .attr("markerWidth", 9).attr("markerHeight", 9)
+            .attr("orient", "auto")
+            .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", "#888");
+
+        const forceLinks = fc.plot.append("g")
+            .attr("stroke", "#888").attr("stroke-opacity", 0.5)
+            .selectAll("line").data(fLinks).join("line")
+            .attr("stroke-width", d => Math.max(1.5, Math.sqrt(d.value)))
+            .attr("marker-end", "url(#arrow)");
+
+        const forceNodes = fc.plot.append("g")
+            .selectAll("circle").data(fNodes).join("circle")
+            .attr("r", NODE_R)
+            .attr("fill", d => colour(d.id))
+            .attr("stroke", "white").attr("stroke-width", 2)
+            .style("cursor", "pointer")
+            .on("mouseenter", (e, d) => { showTip(e, d); highlightAcross(d); })
+            .on("mousemove", moveTip)
+            .on("mouseleave", () => { hideTip(); highlightAcross(null); });
+
+        const forceLabels = fc.plot.append("g")
+            .selectAll("text").data(fNodes).join("text")
+            .attr("text-anchor", "middle")
+            .style("font-size", "var(--text-sm)")
+            .style("fill", "#333")
+            .style("paint-order", "stroke")
+            .style("stroke", "white").style("stroke-width", 3)
+            .style("stroke-linejoin", "round")
+            .style("pointer-events", "none")
+            .text(d => d.id);
+
+        function edgePoint(d) {
+            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const off = NODE_R + 5;
+            return { x: d.target.x - dx / len * off, y: d.target.y - dy / len * off };
+        }
+
+        d3.forceSimulation(fNodes)
+            .force("link", d3.forceLink(fLinks).id(d => d.id).distance(85))
+            .force("charge", d3.forceManyBody().strength(-320))
+            .force("center", d3.forceCenter(fc.innerW / 2, fc.innerH / 2))
+            .force("collide", d3.forceCollide().radius(30))
+            .force("boundary", boundaryForce(fc.innerW, fc.innerH))
+            .on("tick", () => {
+                forceLinks.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                    .attr("x2", d => edgePoint(d).x).attr("y2", d => edgePoint(d).y);
+                forceNodes.attr("cx", d => d.x).attr("cy", d => d.y);
+                forceLabels.attr("x", d => d.x).attr("y", d => d.y + NODE_R + 11);
+            });
+
+        // ---- synchronized highlight across the two panels ----
+        function highlightAcross(focus) {
+            const id = focus?.id ?? null;
+            const incident = id
+                ? new Set([id].concat(data.links
+                    .filter(l => l.source === id || l.target === id)
+                    .flatMap(l => [l.source, l.target])))
+                : null;
+
+            sankeyNodes.classed("faded", d => id && !incident.has(d.id))
+                       .classed("focus", d => id && d.id === id);
+            sankeyLinks.classed("faded", l => id && l.source.id !== id && l.target.id !== id)
+                       .classed("focus", l => id && (l.source.id === id || l.target.id === id));
+
+            forceNodes.classed("faded", d => id && !incident.has(d.id))
+                      .classed("focus", d => id && d.id === id);
+            forceLinks.classed("faded", l =>
+                    id && (l.source.id ?? l.source) !== id && (l.target.id ?? l.target) !== id)
+                      .classed("focus", l =>
+                    id && ((l.source.id ?? l.source) === id || (l.target.id ?? l.target) === id));
+        }
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-sankey-align.html">&larr; Prev: 12c Sankey alignment</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="../12d/01-hierarchical-bundling.html">Next: 12d hierarchical bundling &rarr;</a>
+    </nav>
+</body>
+
+</html>

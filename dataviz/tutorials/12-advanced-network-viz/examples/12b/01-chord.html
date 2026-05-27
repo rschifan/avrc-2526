@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12b — chord diagram</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>12b — Chord diagram</h1>
+    <p class="lead">The top-30 Game-of-Thrones characters as a chord diagram: the same matrix as 12a,
+        bent into a circle. Arcs on the rim are nodes; ribbons across the interior are weighted edges.
+        Hover a rim arc to isolate one character's flow.
+        <a href="../../12b-chord-diagram.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>Two D3 generators do the work.</strong> <code>d3.chord()</code> turns the N × N
+                weight matrix into arc + ribbon angles; <code>d3.ribbon()</code> + <code>d3.arc()</code>
+                turn those angles into SVG paths.</li>
+            <li><strong>Community ordering on the rim</strong> keeps each colour block contiguous, so the
+                group structure reads at a glance.</li>
+            <li><strong>Hover-to-isolate</strong> hides every ribbon except those touching the hovered arc
+                (fill and stroke, so unconnected edges vanish completely) and dims the arcs it doesn't
+                reach — the standard trick for taming chord density.</li>
+        </ul>
+    </div>
+
+    <div class="container" id="demo-chord"></div>
+
+    <script>
+        const DATA_URL = "../../datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const TOP_N = 30;
+            const top = [...raw.nodes].sort((a, b) => b.bc - a.bc).slice(0, TOP_N);
+            top.sort((a, b) => d3.ascending(a.community, b.community)
+                              || d3.descending(a.bc, b.bc));
+            const idx = new Map(top.map((d, i) => [d.id, i]));
+            const N = top.length;
+            const M = Array.from({ length: N }, () => new Array(N).fill(0));
+            raw.links.forEach(l => {
+                const i = idx.get(l.source), j = idx.get(l.target);
+                if (i != null && j != null) { M[i][j] = l.weight; M[j][i] = l.weight; }
+            });
+
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const c = makeCanvas("#demo-chord", 620,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+            const cx = c.innerW / 2, cy = c.innerH / 2;
+            const outerR = Math.min(cx, cy) - 90;
+            const innerR = outerR - 14;
+
+            const g = c.plot.append("g").attr("transform", `translate(${cx}, ${cy})`);
+
+            const chord = d3.chord().padAngle(0.04).sortSubgroups(d3.descending);
+            const layout = chord(M);
+
+            const arc = d3.arc().innerRadius(innerR).outerRadius(outerR);
+            const ribbon = d3.ribbon().radius(innerR);
+
+            const arcs = g.append("g")
+                .selectAll("path").data(layout.groups).join("path")
+                .attr("d", arc)
+                .attr("fill", d => colour(top[d.index].community))
+                .attr("stroke", "white").attr("stroke-width", 0.7)
+                .style("cursor", "pointer");
+
+            const ribbons = g.append("g").attr("fill-opacity", 0.55)
+                .selectAll("path").data(layout).join("path")
+                .attr("d", ribbon)
+                .attr("fill", d => colour(top[d.source.index].community))
+                .attr("stroke", "white").attr("stroke-width", 0.3);
+
+            g.append("g")
+                .selectAll("text").data(layout.groups).join("text")
+                .attr("transform", d => {
+                    const a = (d.startAngle + d.endAngle) / 2;
+                    const r = outerR + 10;
+                    let deg = a * 180 / Math.PI - 90;
+                    const flip = (deg > 90 && deg < 270);
+                    return `rotate(${deg}) translate(${r}, 0)${flip ? " rotate(180)" : ""}`;
+                })
+                .attr("text-anchor", d => {
+                    const a = (d.startAngle + d.endAngle) / 2;
+                    const deg = a * 180 / Math.PI - 90;
+                    return (deg > 90 && deg < 270) ? "end" : "start";
+                })
+                .attr("dy", 4)
+                .style("font-size", "var(--text-sm)")
+                .style("fill", "#333")
+                .text(d => top[d.index].id.replace(/-/g, " "));
+
+            // hover: keep only the ribbons touching the hovered node, hide the rest
+            // (fill AND stroke, so unconnected edges leave nothing behind)
+            arcs.on("mouseenter", (e, d) => {
+                const touches = r => r.source.index === d.index || r.target.index === d.index;
+                ribbons.attr("fill-opacity",   r => touches(r) ? 0.85 : 0)
+                       .attr("stroke-opacity", r => touches(r) ? 1    : 0);
+                arcs.attr("opacity", a =>
+                    a.index === d.index || layout.some(r =>
+                        (r.source.index === d.index && r.target.index === a.index) ||
+                        (r.target.index === d.index && r.source.index === a.index)
+                    ) ? 1 : 0.25);
+            });
+            arcs.on("mouseleave", () => {
+                ribbons.attr("fill-opacity", 0.55).attr("stroke-opacity", 1);
+                arcs.attr("opacity", 1);
+            });
+
+            arcs.append("title").text(d => top[d.index].id.replace(/-/g, " "));
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../12a/01-ordered-matrix.html">&larr; Prev: 12a ordered matrix</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="../12c/01-sankey-align.html">Next: 12c sankey alignment &rarr;</a>
+    </nav>
+</body>
+
+</html>

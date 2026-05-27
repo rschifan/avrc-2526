@@ -14,7 +14,8 @@
     <p class="lead">Three built-in forces + a hand-written boundary force are enough for a working
         layout. The simulation iterates; on every <code>tick</code> we copy node positions onto the
         SVG marks.
-        <a href="../../11b-force-layouts.html">Source tutorial &rarr;</a></p>
+        <a href="../../11b-force-layouts.html">Source tutorial &rarr;</a>
+    </p>
 
     <div class="note">
         <h3>What this example shows</h3>
@@ -27,7 +28,8 @@
                 forces with <code>.force(name, force)</code>; you read positions in a
                 <code>"tick"</code> handler. The tick handler is the hinge between the simulation
                 (which mutates <code>d.x</code>, <code>d.y</code>) and the data join (which renders
-                them).</li>
+                them).
+            </li>
             <li><strong>Standard forces</strong>:
                 <ul>
                     <li><code>forceLink</code>: springs along edges. <code>.id(d =&gt; d.id)</code>
@@ -41,7 +43,7 @@
                 random positions into the final shape, which is confusing on first viewing.</li>
         </ul>
         <p style="margin-top: 0.6em;"><strong>This is the one place we use
-            <code>fitToCanvas</code>.</strong> The simulation above has no boundary — only
+                <code>fitToCanvas</code>.</strong> The simulation above has no boundary — only
             <code>forceCenter</code>. Without something else, the layout can drift past the
             canvas edges. <code>fitToCanvas(wrap, sim, nodes, innerW, innerH)</code> attaches to
             the simulation's <code>"end"</code> event: it computes the bounding box of node
@@ -52,7 +54,8 @@
             Every other L11 demo uses neither: just a gentle
             <code>forceX(cx).strength(0.1)</code> + <code>forceY(cy).strength(0.1)</code> pair,
             the modern default, which keeps the layout on canvas without either an after-the-fact
-            transform or a hard clip.</p>
+            transform or a hard clip.
+        </p>
     </div>
 
     <p><button id="restart">Restart simulation</button></p>
@@ -88,7 +91,7 @@
 
                 if (sim) sim.stop();
                 sim = d3.forceSimulation(nodes)
-                    .force("link",   d3.forceLink(links).id(d => d.id))
+                    .force("link", d3.forceLink(links).id(d => d.id))
                     .force("charge", d3.forceManyBody())
                     .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
                     .on("tick", () => {

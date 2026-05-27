@@ -18,11 +18,16 @@
 
     <div class="note">
         <h3>What this example shows</h3>
-        <p>The handler reads the current pin state directly off the datum:
-            <code>d.fx == null</code> means "currently free" → pin at current position.
-            Anything else means "currently pinned" → release. State lives on the data, not in a
-            separate set — which makes it survive reheats, joins, and re-renders for free.</p>
+        <p>The click handler toggles a <code>__pinned</code> flag on the datum and drives
+            <code>fx</code>/<code>fy</code> and the ring style from it. State lives on the data, not
+            in a separate set — so it survives reheats, joins, and re-renders for free.</p>
         <ul>
+            <li><strong>Why a flag, not <code>d.fx == null</code></strong>: the node also has the
+                drag behaviour, and a plain click is a zero-distance drag — <code>start</code> then
+                <code>end</code> fire <em>before</em> <code>click</code>. If the drag's
+                <code>end</code> always cleared <code>fx</code>/<code>fy</code>, every click would
+                see <code>fx == null</code> and re-pin, so the node could never release. The drag
+                end here guards with <code>if (!d.__pinned)</code>.</li>
             <li><strong>Pin at current position</strong>, not at <code>event.x</code>: the user
                 clicked a node — they expect it to stay where they clicked it, not snap to the
                 pointer's exact pixel.</li>
@@ -39,7 +44,7 @@
                 interaction vocabulary every L11 demo uses.</li>
             <li><strong>Edge case</strong>: <code>event.stopPropagation()</code> is sometimes
                 added to prevent the click from bubbling to a background handler (background
-                clicks reset state in the 11e capstone). Not needed here, but worth remembering
+                clicks reset state in the 11g capstone). Not needed here, but worth remembering
                 for richer apps.</li>
         </ul>
     </div>

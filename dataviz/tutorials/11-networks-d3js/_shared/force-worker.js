@@ -51,9 +51,9 @@ function init({ nodes: ns, links: ls, w, h }) {
     if (sim) sim.stop();
     sim = d3.forceSimulation(nodes)
         .force("link",   d3.forceLink(links).id(d => d.id).distance(20))
-        .force("charge", d3.forceManyBody().strength(-25))
-        .force("x",      d3.forceX(w / 2).strength(0.04))
-        .force("y",      d3.forceY(h / 2).strength(0.04))
+        .force("charge", d3.forceManyBody().strength(-30).theta(0.1))   // low theta = heavy compute
+        .force("x",      d3.forceX(w / 2).strength(0.07))
+        .force("y",      d3.forceY(h / 2).strength(0.07))
         .alphaDecay(0.02)
         .on("tick", () => {
             // pack positions into a Float32Array and ship via Transferable

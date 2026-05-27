@@ -36,7 +36,7 @@
                 right column. Both the node transition and the link-endpoint transition read
                 from this same map, so edges follow the nodes that move them.</li>
             <li><strong>Use case</strong>: focused view of one node's ego network. The capstone
-                in 11e binds it to <code>shift+click</code> so the plain click can still pin.</li>
+                in 11g binds it to <code>shift+click</code> so the plain click can still pin.</li>
         </ul>
     </div>
 
@@ -101,6 +101,7 @@
 
             node.call(d3.drag()
                 .container(() => c.plot.node())
+                .filter(() => phase === "idle")   // ignore drags while a node is isolated
                 .on("start", (e, d) => {
                     if (!e.active) sim.alphaTarget(0.3).restart();
                     d.fx = d.x; d.fy = d.y;

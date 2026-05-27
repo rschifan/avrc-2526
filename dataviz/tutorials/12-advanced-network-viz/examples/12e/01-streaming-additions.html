@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12e §4 — streaming growth (preferential attachment)</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+    <style>
+        .stream-ctrl { display: flex; gap: 0.8em; align-items: center; flex-wrap: wrap;
+                       margin: 0.6em 0; font-size: 14.5px; }
+        .stats { color: #555; font-variant-numeric: tabular-nums; }
+    </style>
+</head>
+
+<body>
+    <h1>12e §4 — Streaming growth (preferential attachment)</h1>
+    <p class="lead">A graph that grows one node at a time by the Barabási–Albert rule: each arrival links
+        to <em>M = 2</em> existing nodes, chosen with probability proportional to their current degree.
+        Node size and shade track degree, so you can watch a few hubs pull away from the crowd.
+        <a href="../../12e-dynamic-graphs.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>Emergence from a simple rule.</strong> "The rich get richer" — popular nodes
+                attract most new links, producing the heavy-tailed degree distribution of a scale-free
+                network. It is only visible because the graph is animated as it grows.</li>
+            <li><strong>The degree-weighted pick.</strong> An <code>endpoints</code> pool holds every
+                node id once per incident edge, so a uniform draw from it is automatically ∝ degree.</li>
+            <li><strong>Keyed joins + gentle reheat.</strong> Nodes are joined by <code>d.id</code> and
+                links by a <code>source-target</code> string; each update rebuilds <code>forceLink</code>
+                and reheats at <code>alpha(0.5)</code> so survivors keep their positions.</li>
+            <li><strong>Re-encoding on update.</strong> The <code>update</code> callback re-runs the
+                radius transition, so hubs visibly swell as their degree climbs.</li>
+        </ul>
+    </div>
+
+    <div class="stream-ctrl">
+        <button id="toggle">Pause</button>
+        <button id="step">Add one node</button>
+        <button id="reset">Reset</button>
+        <span id="stats" class="stats">—</span>
+    </div>
+    <div id="demo"></div>
+
+    <script>
+        const c = makeCanvas("#demo", 520, { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+        const M = 2;
+        const r = d3.scaleSqrt().domain([1, 1]).range([4, 22]).clamp(true);
+        const fillFor = d => {
+            const maxDeg = r.domain()[1] || 1;
+            return d3.interpolateBlues(0.35 + 0.55 * (d.degree / maxDeg));
+        };
+
+        let nodes, links, byId, endpoints, nextId, timer = null, paused = false;
+
+        const linkG = c.plot.append("g").attr("stroke", "#aaa").attr("stroke-opacity", 0.4);
+        const nodeG = c.plot.append("g");
+        let link = linkG.selectAll("line"), node = nodeG.selectAll("circle");
+
+        const sim = d3.forceSimulation([])
+            .force("link", d3.forceLink([]).id(d => d.id).distance(30))
+            .force("charge", d3.forceManyBody().strength(-90))
+            .force("x", d3.forceX(c.innerW / 2).strength(0.05))
+            .force("y", d3.forceY(c.innerH / 2).strength(0.05))
+            .force("collide", d3.forceCollide(d => r(d.degree) + 1))
+            .alphaDecay(0.04)
+            .on("tick", () => {
+                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                node.attr("cx", d => d.x).attr("cy", d => d.y);
+            });
+
+        function pickTargets(m) {
+            if (nodes.length <= m) return nodes.map(n => n.id);
+            const chosen = new Set();
+            while (chosen.size < m)
+                chosen.add(endpoints[Math.floor(Math.random() * endpoints.length)]);
+            return [...chosen];
+        }
+
+        function pulse(id) {
+            nodeG.selectAll("circle").filter(d => d.id === id)
+                .attr("stroke", "#D55E00").attr("stroke-width", 3.5)
+                .transition("pulse").duration(900).attr("stroke", "#fff").attr("stroke-width", 1.2);
+        }
+
+        function update(newestId) {
+            r.domain([1, d3.max(nodes, d => d.degree) || 1]);
+            sim.nodes(nodes);
+            sim.force("link", d3.forceLink(links).id(d => d.id).distance(30));
+            sim.force("collide", d3.forceCollide(d => r(d.degree) + 1));
+            sim.alpha(0.5).restart();
+
+            link = linkG.selectAll("line")
+                .data(links, l => `${l.source.id ?? l.source}-${l.target.id ?? l.target}`)
+                .join(
+                    e => e.append("line").attr("stroke-opacity", 0)
+                          .call(t => t.transition().duration(400).attr("stroke-opacity", 0.4)),
+                    u => u,
+                    x => x.transition().duration(300).attr("stroke-opacity", 0).remove()
+                );
+            node = nodeG.selectAll("circle")
+                .data(nodes, d => d.id)
+                .join(
+                    e => e.append("circle").attr("r", 0)
+                          .attr("fill", fillFor)
+                          .attr("stroke", "#fff").attr("stroke-width", 1.2)
+                          .call(t => t.transition().duration(400).attr("r", d => r(d.degree))),
+                    u => u.call(t => t.transition().duration(400)
+                          .attr("r", d => r(d.degree)).attr("fill", fillFor)),
+                    x => x.transition().duration(300).attr("r", 0).remove()
+                );
+
+            const maxDeg = d3.max(nodes, d => d.degree) || 0;
+            d3.select("#stats")
+                .text(`${nodes.length} nodes · ${links.length} links · largest hub: ${maxDeg} links`);
+
+            pulse(newestId);
+        }
+
+        function addNode() {
+            const v = { id: nextId++, degree: 0 };
+            const targets = pickTargets(M);
+            nodes.push(v);
+            byId.set(v.id, v);
+            for (const t of targets) {
+                links.push({ source: v.id, target: t });
+                endpoints.push(v.id, t);
+                v.degree++; byId.get(t).degree++;
+            }
+            update(v.id);
+        }
+
+        function reset() {
+            nodes = []; links = []; byId = new Map(); endpoints = []; nextId = 0;
+            update(null);
+            for (let i = 0; i < 4; i++) addNode();
+        }
+        function start() { if (!timer) timer = d3.interval(addNode, 700); }
+        function stop() { if (timer) { timer.stop(); timer = null; } }
+
+        reset();
+        start();
+
+        document.getElementById("toggle").addEventListener("click", function () {
+            paused = !paused;
+            this.textContent = paused ? "Resume" : "Pause";
+            paused ? stop() : start();
+        });
+        document.getElementById("step").addEventListener("click", addNode);
+        document.getElementById("reset").addEventListener("click", () => {
+            reset();
+            if (!paused) start();
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../12d/02-force-directed-bundling.html">&larr; Prev: 12d force-directed bundling</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="02-snapshots.html">Next: §5 snapshot transitions &rarr;</a>
+    </nav>
+</body>
+
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12e §5 — snapshot transitions with stable layout</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+    <style>
+        .tl { display: flex; gap: 0.8em; align-items: center; flex-wrap: wrap; margin: 0.6em 0; }
+        .tl-btn { padding: 0.3em 0.8em; }
+        .tl-btn.active { background: #0072B2; color: white; border-color: #0072B2; }
+        .caption { color: #555; font-style: italic; margin: 0.5em 0 0.2em; min-height: 1.3em; }
+    </style>
+</head>
+
+<body>
+    <h1>12e §5 — Snapshot transitions</h1>
+    <p class="lead">A small research group sampled once a year. The three snapshots share most members;
+        surviving nodes keep their positions across each swap, newcomers grow in, departed members fade
+        out. <a href="../../12e-dynamic-graphs.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <p>The snapshot pattern: discrete data states, not a continuous stream. Each snapshot
+            ships its own <code>nodes</code> and <code>links</code>; we map old
+            <code>x</code> / <code>y</code> onto surviving ids via a <code>byId</code> Map so the
+            simulation continues from the previous layout instead of restarting.</p>
+        <ul>
+            <li><strong>The <code>byId</code> trick</strong>: at every snapshot we copy the previous
+                frame's <code>x</code> / <code>y</code> onto the new node objects (by id). The simulation
+                reads these as starting positions and treats the layout as "mostly relaxed" — a small
+                alpha (0.4–0.5) is enough.</li>
+            <li><strong>Keyed joins for both nodes and links</strong>: nodes by <code>d.id</code>; links
+                by <code>"source-target"</code>. Without this every snapshot would re-create every DOM
+                element from scratch.</li>
+            <li><strong>The update callback re-encodes</strong> the fill, because group membership can
+                shift between snapshots — watch member F change community in Year 3.</li>
+            <li><strong>When to use this vs streaming</strong>: snapshots when you have a known, small
+                number of states (years, sessions, sliding windows); streaming when events arrive at
+                unpredictable times.</li>
+            <li><strong>Real-world data</strong>: temporal co-authorship networks (DBLP), evolving
+                citation graphs, friendship snapshots over months — same pattern, only the source of the
+                arrays changes.</li>
+        </ul>
+    </div>
+
+    <div class="tl">
+        <button class="tl-btn active" data-t="0">Year 1</button>
+        <button class="tl-btn" data-t="1">Year 2</button>
+        <button class="tl-btn" data-t="2">Year 3</button>
+        <button id="play">▶ Play</button>
+    </div>
+    <div id="demo"></div>
+    <p class="caption" id="caption">—</p>
+
+    <script>
+        const c = makeCanvas("#demo", 480, { margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+        const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+        const SNAPS = [
+            {
+                nodes: ["A", "B", "C", "D", "E"].map((id, i) => ({ id, group: i < 3 ? 0 : 1 })),
+                links: [["A", "B"], ["B", "C"], ["A", "C"], ["D", "E"], ["C", "D"]]
+                    .map(([s, t]) => ({ source: s, target: t }))
+            },
+            {
+                nodes: ["A", "B", "C", "D", "E", "F", "G", "H", "I"].map(id =>
+                    ({ id, group: ["A", "B", "C", "F", "G"].includes(id) ? 0 : 1 })),
+                links: [
+                    ["A", "B"], ["B", "C"], ["A", "C"], ["A", "F"], ["F", "G"], ["C", "G"],
+                    ["D", "E"], ["E", "H"], ["D", "H"], ["H", "I"], ["E", "I"]
+                ].map(([s, t]) => ({ source: s, target: t }))
+            },
+            {
+                nodes: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"].map(id =>
+                    ({ id, group: ["A", "B", "C"].includes(id) ? 0
+                                : ["D", "E", "F", "H", "I"].includes(id) ? 1 : 2 })),
+                links: [
+                    ["A", "B"], ["B", "C"], ["A", "C"],
+                    ["D", "E"], ["D", "F"], ["E", "F"], ["E", "H"], ["H", "I"], ["F", "I"],
+                    ["G", "J"], ["J", "K"], ["G", "K"], ["C", "G"]
+                ].map(([s, t]) => ({ source: s, target: t }))
+            }
+        ];
+        const CAPS = [
+            "Year 1 — a small core forms: two tight triangles linked by a single bridge (C–D).",
+            "Year 2 — both clusters densify and grow; new members attach to whoever is already central.",
+            "Year 3 — a third community (G, J, K) splits off, and member F switches allegiance."
+        ];
+
+        const linkG = c.plot.append("g").attr("stroke", "#aaa").attr("stroke-opacity", 0.45);
+        const nodeG = c.plot.append("g");
+        let link = linkG.selectAll("line"), node = nodeG.selectAll("circle");
+
+        let byId = new Map();
+        let nodes = [], links = [];
+
+        const sim = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id(d => d.id).distance(40))
+            .force("charge", d3.forceManyBody().strength(-120))
+            .force("x", d3.forceX(c.innerW / 2).strength(0.06))
+            .force("y", d3.forceY(c.innerH / 2).strength(0.06))
+            .force("collide", d3.forceCollide(10))
+            .alphaDecay(0.03)
+            .on("tick", () => {
+                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                node.attr("cx", d => d.x).attr("cy", d => d.y);
+            });
+
+        function snapshot(t) {
+            const snap = SNAPS[t];
+            nodes = snap.nodes.map(d => Object.assign(byId.get(d.id) ?? {}, d));
+            links = snap.links.map(l => ({ ...l }));
+            byId = new Map(nodes.map(d => [d.id, d]));
+
+            sim.nodes(nodes);
+            sim.force("link", d3.forceLink(links).id(d => d.id).distance(40));
+            sim.alpha(0.5).restart();
+
+            link = linkG.selectAll("line")
+                .data(links, l => `${l.source.id ?? l.source}-${l.target.id ?? l.target}`)
+                .join(
+                    e => e.append("line").attr("stroke-opacity", 0)
+                          .call(tr => tr.transition().duration(500).attr("stroke-opacity", 0.45)),
+                    u => u,
+                    x => x.transition().duration(400).attr("stroke-opacity", 0).remove()
+                );
+            node = nodeG.selectAll("circle")
+                .data(nodes, d => d.id)
+                .join(
+                    e => e.append("circle").attr("r", 0)
+                          .attr("fill", d => colour(d.group))
+                          .attr("stroke", "white").attr("stroke-width", 1.5)
+                          .call(tr => tr.transition().duration(500).attr("r", 12)),
+                    u => u.call(tr => tr.transition().duration(500).attr("fill", d => colour(d.group))),
+                    x => x.transition().duration(400).attr("r", 0).remove()
+                );
+
+            d3.select("#caption").text(CAPS[t]);
+            d3.selectAll(".tl-btn").classed("active", function () { return +this.dataset.t === t; });
+        }
+
+        snapshot(0);
+        d3.selectAll(".tl-btn").on("click", function () { snapshot(+this.dataset.t); });
+        document.getElementById("play").addEventListener("click", () => {
+            let t = 0;
+            snapshot(0);
+            const iv = d3.interval(() => {
+                t++;
+                if (t >= SNAPS.length) { iv.stop(); return; }
+                snapshot(t);
+            }, 1600);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="01-streaming-additions.html">&larr; Prev: §4 streaming growth</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="../12g/01-four-views.html">Next: 12g four-view capstone &rarr;</a>
+    </nav>
+</body>
+
+</html>

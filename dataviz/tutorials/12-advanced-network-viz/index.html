@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>DV12 — Advanced network visualization</title>
+    <link rel="stylesheet" href="./_shared/chart.css">
+</head>
+
+<body>
+    <h1>DV12 — Advanced network visualization</h1>
+
+    <h2>What you should already know</h2>
+    <p>This lecture builds on L11 (force layouts, drag, hover, zoom on the GoT network) and assumes
+        comfort with the data join, scales, and SVG primitives from L9 / L10.</p>
+
+    <h2>Tutorials</h2>
+    <p>Most use the same Game-of-Thrones co-occurrence network as the running example. The first four
+        introduce alternatives to the node-link view; then we take networks into the time domain and
+        beyond D3, and the <strong>capstone (12g) closes the lecture</strong> by putting four views of
+        the same data side by side.</p>
+    <ol>
+        <li><a href="12a-adjacency-matrix.html"><strong>12a — Adjacency matrix</strong></a><br>
+            Building an N × N matrix from an edge list; cell-per-link join; why <em>row ordering</em>
+            (alphabetical / community / centrality / barycenter) is what determines whether community
+            blocks become visible; row + column highlight on hover.
+        </li>
+        <li><a href="12b-chord-diagram.html"><strong>12b — Chord diagram</strong></a><br>
+            <code>d3.chord()</code> + <code>d3.ribbon()</code> + <code>d3.arc()</code> on the same matrix;
+            community ordering on the rim; hover-fade to isolate a node's flow; when chord works (and
+            doesn't).
+        </li>
+        <li><a href="12c-sankey.html"><strong>12c — Sankey diagram</strong></a><br>
+            Visualizing flows on a directed acyclic graph; the <code>d3-sankey</code> plugin;
+            <code>nodeAlign</code>, <code>nodePadding</code>, <code>extent</code>; reading width = quantity;
+            and a linked Sankey + force view driven by one synchronized hover.
+        </li>
+        <li><a href="12d-edge-bundling.html"><strong>12d — Hierarchical edge bundling</strong></a><br>
+            Wrapping a flat node list in a synthetic hierarchy; <code>d3.cluster</code> on a circle;
+            <code>d3.lineRadial</code> with <code>curveBundle.beta(0.85)</code>; hover to colour a
+            character's edges by the community they reach. Plus the force-directed family (FDEB), which
+            needs no hierarchy at all.
+        </li>
+        <li><a href="12e-dynamic-graphs.html"><strong>12e — Dynamic and streaming graphs</strong></a><br>
+            What happens when the graph changes over time. The three sub-patterns
+            (<em>streaming</em> / <em>snapshots</em> / <em>continuous</em>);
+            <code>selection.join</code> with key functions for stable transitions; rebuilding
+            <code>forceLink</code> after every update; gentle reheats with <code>alpha(0.4)</code>.
+            Streaming demo (one node every 600 ms) and snapshot demo (three time slices with
+            position-preserving transitions).
+        </li>
+        <li><a href="12f-ecosystem.html"><strong>12f — Beyond D3: the network viz ecosystem</strong></a><br>
+            Where D3 stops being the right answer. Cytoscape.js, sigma.js + Graphology, Cosmograph,
+            Gephi, vis-network, PyVis — what each one is for and where its ceiling sits. The architectural
+            split between graph <em>data structure</em> and <em>renderer</em>, and when to stay in D3.
+        </li>
+        <li><a href="12g-capstone-comparison.html"><strong>12g — Capstone: same data, four views</strong></a><br>
+            Force / matrix / chord / bundling on the same 30 GoT characters and the same colour scale,
+            wired to a single synchronized hover; a decision guide for picking the right view per
+            question; and a closing synthesis of the whole lecture.
+        </li>
+    </ol>
+
+    <h2>Accessibility (cross-cutting note)</h2>
+    <p>Force-directed networks are notoriously inaccessible — SVG geometry conveys no semantics
+        to screen readers, and Canvas / WebGL conveys none at all. The matrix view in 12a is
+        the exception: it has a natural <code>&lt;table&gt;</code>-shaped accessible companion
+        (one <code>&lt;tr&gt;</code> per row, one <code>&lt;td&gt;</code> per cell). When
+        a11y matters, ship the matrix as <code>role="presentation"</code> SVG plus a parallel
+        <code>&lt;table&gt;</code> with <code>aria-hidden="true"</code> on the visual. The
+        chord and sankey tutorials (12b, 12c) have less natural fallbacks; ship a summary
+        table with the totals so screen readers get the same numbers the chart shows.</p>
+
+    <h2>Setup</h2>
+    <p>Self-contained: every local asset (<code>_shared/chart.css</code>, <code>_shared/chart.js</code>,
+        <code>datasets/got.json</code>) is inside this folder. Run from a local server to satisfy CORS
+        (the JSON load fails over <code>file://</code>):</p>
+    <pre><code>cd 12-advanced-network-viz
+python -m http.server 8000
+# open http://localhost:8000/</code></pre>
+    <p>D3 loads from its CDN. Two tutorials add one more library from a CDN: <code>d3-sankey</code>
+        (12c) and <code>d3.ForceEdgeBundling</code> (12d).</p>
+
+    <h2>Examples</h2>
+    <p>The <code>examples/</code> subfolder has one self-contained HTML file per demo — each with a short
+        "what this example shows" note and prev / next navigation, so you can walk the whole lecture end
+        to end or grab one pattern in isolation.</p>
+    <table>
+        <thead><tr><th>Tutorial</th><th>Examples</th></tr></thead>
+        <tbody>
+            <tr>
+                <td><a href="12a-adjacency-matrix.html">12a — Adjacency matrix</a></td>
+                <td><a href="examples/12a/01-ordered-matrix.html">ordered matrix</a></td>
+            </tr>
+            <tr>
+                <td><a href="12b-chord-diagram.html">12b — Chord diagram</a></td>
+                <td><a href="examples/12b/01-chord.html">chord diagram</a></td>
+            </tr>
+            <tr>
+                <td><a href="12c-sankey.html">12c — Sankey</a></td>
+                <td>
+                    <a href="examples/12c/01-sankey-align.html">layout &amp; node alignment</a> ·
+                    <a href="examples/12c/02-linked-sankey-force.html">linked Sankey + force</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="12d-edge-bundling.html">12d — Edge bundling</a></td>
+                <td>
+                    <a href="examples/12d/01-hierarchical-bundling.html">hierarchical bundling</a> ·
+                    <a href="examples/12d/02-force-directed-bundling.html">force-directed bundling</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="12e-dynamic-graphs.html">12e — Dynamic graphs</a></td>
+                <td>
+                    <a href="examples/12e/01-streaming-additions.html">streaming additions</a> ·
+                    <a href="examples/12e/02-snapshots.html">snapshot transitions</a>
+                </td>
+            </tr>
+            <tr>
+                <td><a href="12g-capstone-comparison.html">12g — Capstone</a></td>
+                <td><a href="examples/12g/01-four-views.html">same data, four views</a></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>References</h2>
+    <ul>
+        <li><a href="https://github.com/d3/d3-chord" target="_blank">d3-chord</a> — chord layout</li>
+        <li><a href="https://github.com/d3/d3-sankey" target="_blank">d3-sankey</a> — sankey plugin</li>
+        <li><a href="https://github.com/d3/d3-hierarchy" target="_blank">d3-hierarchy</a> — cluster,
+            tree, partition</li>
+        <li><a href="https://github.com/d3/d3-shape#curves" target="_blank">d3-shape · curves</a> — every
+            curve type, including <code>curveBundle</code></li>
+        <li><a href="https://observablehq.com/@d3/hierarchical-edge-bundling" target="_blank">Hierarchical
+            edge bundling (Observable)</a> ·
+            <a href="https://github.com/upphiminn/d3.ForceBundle" target="_blank">d3.ForceBundle</a>
+            (force-directed bundling)</li>
+        <li><a href="https://observablehq.com/@d3/modifying-a-force-directed-graph" target="_blank">Modifying
+            a force-directed graph (Observable)</a> — the canonical add/remove pattern (12e).</li>
+        <li><a href="https://www.sciencedirect.com/topics/computer-science/dynamic-graph-visualization"
+            target="_blank">Beck et al., A taxonomy and survey of dynamic graph visualization</a></li>
+        <li><a href="https://js.cytoscape.org/" target="_blank">Cytoscape.js</a> ·
+            <a href="https://www.sigmajs.org/" target="_blank">sigma.js</a> /
+            <a href="https://graphology.github.io/" target="_blank">Graphology</a> ·
+            <a href="https://cosmograph.app/" target="_blank">Cosmograph</a> ·
+            <a href="https://gephi.org/" target="_blank">Gephi</a></li>
+    </ul>
+</body>
+
+</html>

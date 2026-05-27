@@ -3,17 +3,19 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11d §3 — community hulls with d3.polygonHull</title>
+    <title>11d §4 — community hulls with d3.polygonHull</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
 </head>
 
 <body>
-    <h1>11d §3 — Community hulls</h1>
+    <h1>11d §4 — Community hulls</h1>
     <p class="lead">Colour-by-community gets you most of the way; <em>drawing the community
         boundary</em> finishes the job. <code>d3.polygonHull</code> returns the convex hull of a
-        set of points; <code>curveCatmullRomClosed</code> turns it into a smooth, closed shape.
+        set of points; <code>curveCatmullRomClosed</code> turns it into a smooth, closed shape. The
+        hulls here sit over the cluster-force layout (§3), so each community keeps its own region and the
+        boundaries stay cleanly separated.
         <a href="../../11d-encoding-and-zoom.html">Source tutorial &rarr;</a></p>
 
     <div class="note">
@@ -40,7 +42,7 @@
                 nodes paint on top of the hulls. Without the layering, the translucent fills
                 would obscure the marks they're supposed to highlight.</li>
             <li><strong>Performance note</strong>: <code>drawHulls()</code> runs every tick — for
-                187 nodes / 9 communities this is fine. For very large graphs, throttle to every
+                187 nodes / 8 communities this is fine. For very large graphs, throttle to every
                 Nth tick, or only redraw on <code>"end"</code>.</li>
             <li><strong>Toggle visibility</strong> — checkbox above the canvas. The hulls
                 <code>display</code> toggles without rebuilding anything: a cheap "show me with
@@ -106,13 +108,22 @@
                     .attr("vector-effect", "non-scaling-stroke");
             }
 
+            // §3's cluster-force layout: per-community anchors on a ring so each
+            // group keeps its own region and the hulls wrap cleanly separated blobs
+            const cks = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+            const ang = i => (i / cks.length) * 2 * Math.PI - Math.PI / 2;
+            const rad = 0.30 * Math.min(c.innerW, c.innerH);
+            const tgt = new Map(cks.map((cm, i) => [cm, {
+                x: c.innerW / 2 + rad * Math.cos(ang(i)),
+                y: c.innerH / 2 + rad * Math.sin(ang(i))
+            }]));
+
             const sim = d3.forceSimulation(nodes)
-                .force("link",    d3.forceLink(links).id(d => d.id).distance(35))
-                .force("charge",  d3.forceManyBody().strength(-110))
-                .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
-                .force("center",  d3.forceCenter(c.innerW / 2, c.innerH / 2))
-                .force("x", d3.forceX(c.innerW / 2).strength(0.1))
-                .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                .force("link",     d3.forceLink(links).id(d => d.id).distance(30))
+                .force("charge",   d3.forceManyBody().strength(-70))
+                .force("collide",  d3.forceCollide().radius(d => r(d.bc) + 1))
+                .force("xCluster", d3.forceX(d => tgt.get(d.community).x).strength(0.08))
+                .force("yCluster", d3.forceY(d => tgt.get(d.community).y).strength(0.08))
                 .on("tick", () => {
                     link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
                         .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
@@ -124,10 +135,10 @@
     </script>
 
     <nav class="example-nav">
-        <a href="01-encoded-view.html">&larr; Prev: §1-§2 encoded view</a>
+        <a href="02-cluster-forces.html">&larr; Prev: §3 cluster forces</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="../11e/01-capstone.html">Next: 11e capstone &rarr;</a>
+        <a href="../11e/01-zoom-aware-labels.html">Next: 11e §1 semantic zoom &rarr;</a>
     </nav>
 </body>
 

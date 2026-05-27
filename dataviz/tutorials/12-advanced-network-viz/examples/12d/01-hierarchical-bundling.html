@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12d — hierarchical edge bundling</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+</head>
+
+<body>
+    <h1>12d — Hierarchical edge bundling</h1>
+    <p class="lead">The full GoT network as a bundled radial diagram. Characters sit on the rim grouped by
+        community; edges curve toward the centre, bundled through a synthetic
+        <code>root → community → character</code> hierarchy.
+        <a href="../../12d-edge-bundling.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>A hierarchy makes the bundles.</strong> The flat node list is wrapped in a
+                two-level tree; <code>d3.cluster</code> places leaves on a circle, and
+                <code>d3.lineRadial</code> + <code>curveBundle.beta(0.85)</code> routes each edge through
+                its least-common ancestor.</li>
+            <li><strong>Hover a leaf</strong> — its edges take the colour of the community they connect
+                to, so you can see at a glance which groups a character reaches; every other edge fades.</li>
+            <li><strong>Community bands</strong> on the rim make the group structure instantly legible.</li>
+        </ul>
+    </div>
+
+    <div class="container" id="demo-bundle"></div>
+
+    <script>
+        const DATA_URL = "../../datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const nodes = raw.nodes;
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const communities = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+            const tree = {
+                name: "got",
+                children: communities.map(c => ({
+                    name: "c" + c,
+                    community: c,
+                    children: nodes.filter(n => n.community === c)
+                        .sort((a, b) => d3.descending(a.bc, b.bc))
+                        .map(n => ({ name: n.id, leaf: true, ...n }))
+                }))
+            };
+
+            const c = makeCanvas("#demo-bundle", 720,
+                { margin: { top: 20, right: 20, bottom: 20, left: 20 } });
+            const cx = c.innerW / 2, cy = c.innerH / 2;
+            const radius = Math.min(cx, cy);
+
+            const root = d3.hierarchy(tree);
+            d3.cluster().size([2 * Math.PI, radius - 90])(root);
+
+            const byId = new Map(root.leaves().map(l => [l.data.name, l]));
+            const bundleLinks = raw.links
+                .map(l => ({ source: byId.get(l.source), target: byId.get(l.target), weight: l.weight }))
+                .filter(l => l.source && l.target);
+
+            const g = c.plot.append("g").attr("transform", `translate(${cx}, ${cy})`);
+
+            const line = d3.lineRadial()
+                .curve(d3.curveBundle.beta(0.85))
+                .radius(d => d.y)
+                .angle(d => d.x);
+
+            const linkPaths = g.append("g")
+                .attr("fill", "none").attr("stroke", "#888").attr("stroke-opacity", 0.25)
+                .selectAll("path").data(bundleLinks).join("path")
+                .attr("d", l => line(l.source.path(l.target)));
+
+            const leafG = g.append("g");
+            const leaves = root.leaves();
+            const leafCircles = leafG.selectAll("circle").data(leaves).join("circle")
+                .attr("transform", d => `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y}, 0)`)
+                .attr("r", 3.5)
+                .attr("fill", d => colour(d.data.community))
+                .attr("stroke", "white").attr("stroke-width", 0.6)
+                .style("cursor", "pointer");
+
+            const leafLabels = leafG.selectAll("text").data(leaves).join("text")
+                .attr("transform", d => {
+                    const deg = d.x * 180 / Math.PI - 90;
+                    const flip = (d.x >= Math.PI);
+                    return `rotate(${deg}) translate(${d.y + 8}, 0)${flip ? " rotate(180)" : ""}`;
+                })
+                .attr("dy", 3)
+                .attr("text-anchor", d => d.x >= Math.PI ? "end" : "start")
+                .style("font-size", "10px")
+                .style("fill", "#444")
+                .text(d => d.data.name.replace(/-/g, " "));
+
+            leafCircles.on("mouseenter", (e, d) => {
+                linkPaths.attr("stroke", l => {
+                    const inc = (l.source === d || l.target === d);
+                    if (!inc) return "#ccc";
+                    const other = l.source === d ? l.target : l.source;
+                    return colour(other.data.community);
+                })
+                    .attr("stroke-opacity", l => (l.source === d || l.target === d) ? 0.95 : 0.04)
+                    .attr("stroke-width", l => (l.source === d || l.target === d) ? 1.5 : 1);
+                leafLabels.style("font-weight", x => x === d ? "bold" : null)
+                    .style("fill", x => x === d ? "#000" : "#888");
+            });
+            leafCircles.on("mouseleave", () => {
+                linkPaths.attr("stroke", "#888").attr("stroke-opacity", 0.25).attr("stroke-width", 1);
+                leafLabels.style("font-weight", null).style("fill", "#444");
+            });
+
+            leafCircles.append("title").text(d =>
+                `${d.data.name.replace(/-/g, " ")}\ncommunity ${d.data.community}`);
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../12c/02-linked-sankey-force.html">&larr; Prev: 12c linked Sankey + force</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <a href="02-force-directed-bundling.html">Next: 12d force-directed bundling &rarr;</a>
+    </nav>
+</body>
+
+</html>

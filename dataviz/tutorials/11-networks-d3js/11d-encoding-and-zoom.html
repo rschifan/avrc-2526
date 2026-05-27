@@ -16,11 +16,11 @@
     <h1>11d — Visual encoding and community overlays</h1>
     <p class="lead">A force layout fixes <em>position</em>; everything else is up to you.
         <strong>Colour</strong> carries grouping (community, type, category), <strong>size</strong>
-        carries importance (centrality, degree, weight), and <strong>community hulls</strong> draw the
-        groups explicitly. Three short sections, three encoding decisions — that's enough to turn a
-        hairball into a readable network. (Zoom, foreignObject labels, click-to-isolate animation, and
-        the rest of the visual elaborations belong to <code>11f</code>'s progressive build, where
-        they're introduced one at a time on top of these encodings.)</p>
+        carries importance (centrality, degree, weight), and <strong>community structure</strong>
+        can be drawn explicitly. Four short sections, four encoding decisions — that's enough to turn
+        a hairball into a readable network. (Semantic zoom and <code>foreignObject</code> labels are
+        in <a href="11e-rendering-and-scale.html">11e</a>; the click-to-isolate animation is in
+        <a href="11c-interactivity.html">11c §4</a>.)</p>
 
     <h2>1. Colour by community</h2>
     <p>The GoT JSON ships a precomputed <code>community</code> integer per node. Map it through an
@@ -36,7 +36,7 @@ node.attr("fill", d =&gt; colour(d.community));</code></pre>
         (not the radius) so the visual signal is proportional to the metric:</p>
     <pre><code>const r = d3.scaleSqrt()
     .domain(d3.extent(nodes, d =&gt; d.bc))
-    .range([3, 16]);
+    .range([3, 14]);
 
 node.attr("r", d =&gt; r(d.bc));</code></pre>
     <p>Two reasons for <code>scaleSqrt</code> over <code>scaleLinear</code>:</p>
@@ -51,46 +51,75 @@ node.attr("r", d =&gt; r(d.bc));</code></pre>
     <p class="example-link"><a href="examples/11d/01-encoded-view.html" target="_blank" rel="noopener">↗ example</a></p>
 
     <h2>3. Cluster forces — make communities emerge from the layout</h2>
-    <p>Colour-by-community shows you the grouping after the fact: the layout doesn't know what
-        a community is, you just paint each circle. A stronger move is to <em>tell the layout
-        about communities</em> so they separate during simulation. The trick is a per-datum
-        <code>forceX</code> / <code>forceY</code> where each node aims at its <em>community's</em>
-        centroid:</p>
-    <pre><code>// place each community's target on a ring around the canvas centre
-const cks = [...new Set(nodes.map(d =&gt; d.community))];
-const ang = i =&gt; (i / cks.length) * 2 * Math.PI;
+    <p><strong>Why this matters.</strong> A force simulation only knows about <em>edges</em>: it
+        pulls connected nodes together and pushes everything else apart. The <code>community</code>
+        label is a node <em>attribute</em> the layout never looks at, so groups end up spatially
+        blended — colour-by-community (§1) tells you which group a node belongs to, but two
+        communities can still land on top of each other. Position is the strongest visual channel
+        we have, so when grouping is the message we want <em>position itself</em> to carry it, not
+        just hue. Encoding community into the layout answers "how many groups, how big, how
+        separated?" at a glance — even in grayscale, and even before a single colour is drawn.</p>
+    <p>The mechanism is a per-datum <code>forceX</code> / <code>forceY</code>: every node gets a
+        gentle pull toward an <em>anchor point that depends on its community</em>. Step by step:</p>
+    <pre><code>// 1. the distinct community labels in the data
+const cks = [...new Set(nodes.map(d =&gt; d.community))].sort(d3.ascending);
+
+// 2. one anchor per community, spread evenly on a ring around the centre
+const ang = i =&gt; (i / cks.length) * 2 * Math.PI - Math.PI / 2;
 const rad = 0.30 * Math.min(innerW, innerH);
 const tgt = new Map(cks.map((cm, i) =&gt; [cm, {
     x: innerW / 2 + rad * Math.cos(ang(i)),
     y: innerH / 2 + rad * Math.sin(ang(i))
 }]));
 
-sim.force("xCluster", d3.forceX(d =&gt; tgt.get(d.community).x).strength(0.08))
-   .force("yCluster", d3.forceY(d =&gt; tgt.get(d.community).y).strength(0.08));</code></pre>
-    <p>Three things to notice:</p>
-    <ul>
-        <li><strong>The function argument to <code>forceX</code></strong> is the modern idiom: a
-            <em>single</em> <code>forceX</code> with a per-datum target beats writing N separate
-            forces. Same for <code>forceY</code>.</li>
-        <li><strong>Strength 0.08</strong> is gentle enough that link springs still shape
-            within-community geometry; strong enough that communities visibly separate. Drop to
-            0 and you get §2's mixed-up layout back; raise to 0.3 and you get rigid blobs.</li>
-        <li><strong>Cluster forces vs <code>forceCenter</code></strong>: a plain
-            <code>forceCenter</code> wants one centre of mass; cluster forces want many. The
-            two compose, but the practical pattern is to drop <code>forceCenter</code> entirely
-            once you have per-community targets — the targets <em>are</em> the anchors. See
-            <a href="11b-force-layouts.html">11b §2</a> for the underlying argument about
-            <code>forceCenter</code> on disconnected components.</li>
-    </ul>
-    <p>The result: communities pull apart before you even draw a colour. Use this when grouping is
-        the primary signal you want to communicate; compare to §2 above where the communities are
-        present in the data but blended together by the layout:</p>
+// 3. each node is pulled toward ITS community's anchor (note: no forceCenter)
+const sim = d3.forceSimulation(nodes)
+    .force("link",     d3.forceLink(links).id(d =&gt; d.id).distance(30))
+    .force("charge",   d3.forceManyBody().strength(-70))
+    .force("collide",  d3.forceCollide().radius(d =&gt; r(d.bc) + 1))
+    .force("xCluster", d3.forceX(d =&gt; tgt.get(d.community).x).strength(0.08))
+    .force("yCluster", d3.forceY(d =&gt; tgt.get(d.community).y).strength(0.08));</code></pre>
+    <ol>
+        <li><strong>List the communities.</strong> <code>new Set</code> collapses the per-node
+            labels down to the distinct values; sorting just keeps the ring order stable across
+            reloads.</li>
+        <li><strong>Give each community an anchor.</strong> The anchors sit on a ring around the
+            canvas centre, evenly spaced, so every group has its own region to gather in and none
+            starts privileged — all anchors are equidistant from the centre.</li>
+        <li><strong>Pull each node toward its anchor.</strong> The argument to <code>forceX</code>
+            is a <em>function of the datum</em> — <code>d =&gt; tgt.get(d.community).x</code> — so a
+            single <code>forceX</code> sends every node to a <em>different</em> target depending on
+            its community. (This is the modern idiom; it replaces writing one force per group.)
+            On each tick the force nudges a node a little toward its anchor, by an amount
+            proportional to the distance, the <code>strength</code>, and the current
+            <code>alpha</code>.</li>
+    </ol>
+    <p>The anchors don't act alone — they <em>compete</em> with the other forces. Link springs
+        keep connected nodes close, charge spreads everything out, and the cluster pull gathers
+        same-community nodes onto a shared anchor. That balance is what produces visibly separated
+        groups whose internal shape is still driven by the real edges.</p>
+    <p><strong>Tuning the pull.</strong> Strength <code>0.08</code> is the sweet spot here: gentle
+        enough that link springs still shape within-community geometry, strong enough that
+        communities clearly separate. Drop it to <code>0</code> and you are back to §2's blended
+        layout; raise it to <code>0.3</code> and the groups collapse into rigid blobs.</p>
+    <p><strong>Why no <code>forceCenter</code>.</strong> A plain <code>forceCenter</code> wants a
+        <em>single</em> centre of mass — exactly what we are trying to break apart. The
+        per-community anchors already pin every node to a point inside the canvas, so they do the
+        on-screen job <code>forceCenter</code> normally does <em>while also</em> separating the
+        groups; adding it back would only fight that separation. (See
+        <a href="11b-force-layouts.html">11b §2</a> for the related argument about
+        <code>forceCenter</code> on disconnected components.)</p>
+    <p>The result: communities pull apart from the structure itself, before a single colour is
+        applied. Use this when grouping is the primary signal; compare it with §2 above, where the
+        same communities are present in the data but blended together by the layout. The dashed
+        rings below mark the community anchors, so you can watch each group migrate to its own
+        target:</p>
     <div class="container" id="demo-cluster"></div>
+    <p class="example-link"><a href="examples/11d/02-cluster-forces.html" target="_blank" rel="noopener">↗ example</a></p>
     <p>For more than ~10 communities, the plugins
         <a href="https://github.com/john-guerra/forceInABox" target="_blank">forceInABox</a> and
         <a href="https://github.com/ericsoco/d3-force-cluster" target="_blank">d3-force-cluster</a>
-        do the same idea with smarter packing. The
-        <a href="11f-progressive-build.html">11f stage 7 stage</a> shows the standalone version.</p>
+        do the same idea with smarter packing.</p>
 
     <h2>4. Convex hulls — drawing the communities</h2>
     <p>Colour-by-community gets you most of the way; <strong>drawing the community boundary</strong>
@@ -119,10 +148,12 @@ function drawHulls() {
 
 sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */ });</code></pre>
     <p>The result lifts the community structure out of the colour and turns it into a first-class
-        visual element. Toggle the hulls on and off to see the effect:</p>
+        visual element. The demo below draws the hulls over the <strong>cluster-force layout from
+        §3</strong>, so each community already occupies its own region and the boundaries read as clean,
+        separated shapes instead of overlapping tangles. Toggle the hulls on and off to see the effect:</p>
     <p><label><input type="checkbox" id="hull-toggle" checked> show community hulls</label></p>
     <div class="container" id="demo-hulls"></div>
-    <p class="example-link"><a href="examples/11d/02-community-hulls.html" target="_blank" rel="noopener">↗ example</a></p>
+    <p class="example-link"><a href="examples/11d/03-community-hulls.html" target="_blank" rel="noopener">↗ example</a></p>
 
     <div class="note"><strong>Takeaway.</strong> Categorical attribute → <code>scaleOrdinal</code> →
         colour. Quantitative attribute → <code>scaleSqrt</code> → radius. Group structure has
@@ -130,8 +161,8 @@ sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */
         (<code>forceX</code> / <code>forceY</code> with per-community targets), or draw it
         <em>after</em> the layout via <code>d3.polygonHull</code> + <code>curveCatmullRomClosed</code>.
         Use cluster forces when grouping is the primary signal; use hulls when the layout already
-        separates groups well and you just want to outline them. The 11f progressive build shows
-        each technique standalone.</div>
+        separates groups well and you just want to outline them — and they <em>compose</em>, as in the
+        §4 demo, which outlines the cluster-force layout for the most legible result.</div>
 
     <h2>References</h2>
     <ul>
@@ -141,7 +172,7 @@ sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */
 
     <p class="tutorial-nav"><a href="11c-interactivity.html">← 11c — Interactivity</a> ·
         <a href="index.html">L11 index</a> ·
-        <a href="11e-capstone.html">11e — Capstone →</a></p>
+        <a href="11e-rendering-and-scale.html">11e — Rendering and scale →</a></p>
 
     <script>
         const DATA_URL = "./datasets/got.json";
@@ -174,6 +205,14 @@ sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */
                     x: c.innerW / 2 + rad * Math.cos(ang(i)),
                     y: c.innerH / 2 + rad * Math.sin(ang(i))
                 }]));
+
+                // dashed markers for the community anchors (the §3 step-2 targets)
+                c.plot.append("g").selectAll("circle")
+                    .data(cks.map(cm => tgt.get(cm))).join("circle")
+                    .attr("cx", d => d.x).attr("cy", d => d.y).attr("r", 5)
+                    .attr("fill", "none").attr("stroke", "#999")
+                    .attr("stroke-dasharray", "2,2")
+                    .attr("vector-effect", "non-scaling-stroke");
 
                 const link = c.plot.append("g").attr("stroke", "#bbb")
                     .attr("stroke-opacity", 0.4)
@@ -293,13 +332,22 @@ sim.on("tick", () =&gt; { drawHulls(); /* …plus the usual node/link updates */
                         .attr("vector-effect", "non-scaling-stroke");
                 }
 
+                // §3's cluster-force layout: per-community anchors on a ring so each
+                // group keeps its own region and the hulls wrap cleanly separated blobs
+                const cks = [...new Set(nodes.map(d => d.community))].sort(d3.ascending);
+                const ang = i => (i / cks.length) * 2 * Math.PI - Math.PI / 2;
+                const rad = 0.30 * Math.min(c.innerW, c.innerH);
+                const tgt = new Map(cks.map((cm, i) => [cm, {
+                    x: c.innerW / 2 + rad * Math.cos(ang(i)),
+                    y: c.innerH / 2 + rad * Math.sin(ang(i))
+                }]));
+
                 const sim = d3.forceSimulation(nodes)
-                    .force("link", d3.forceLink(links).id(d => d.id).distance(35))
-                    .force("charge", d3.forceManyBody().strength(-110))
+                    .force("link", d3.forceLink(links).id(d => d.id).distance(30))
+                    .force("charge", d3.forceManyBody().strength(-70))
                     .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
-                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
-                    .force("x", d3.forceX(c.innerW / 2).strength(0.1))
-                    .force("y", d3.forceY(c.innerH / 2).strength(0.1))
+                    .force("xCluster", d3.forceX(d => tgt.get(d.community).x).strength(0.08))
+                    .force("yCluster", d3.forceY(d => tgt.get(d.community).y).strength(0.08))
                     .on("tick", () => {
                         link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
                             .attr("x2", d => d.target.x).attr("y2", d => d.target.y);

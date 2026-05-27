@@ -3,25 +3,25 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11f — Stage 5: styled label boxes via foreignObject</title>
+    <title>11e §2 — styled label boxes via foreignObject</title>
     <link rel="stylesheet" href="../_shared/example.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="../_shared/utils.js"></script>
 </head>
 
 <body>
-    <h1>11f — Stage 5: Styled label boxes (<code>foreignObject</code>)</h1>
+    <h1>11e §2 — Styled label boxes (<code>foreignObject</code>)</h1>
     <p class="lead">SVG <code>&lt;text&gt;</code> is plain text. For pill-shaped, coloured,
         shadowed labels we need HTML/CSS — embedded into the SVG via
         <code>&lt;foreignObject&gt;</code> wrapping an <code>xhtml:div</code>.
-        <a href="../../11f-progressive-build.html">Source tutorial &rarr;</a></p>
+        <a href="../../11e-rendering-and-scale.html">Source tutorial &rarr;</a></p>
 
     <div class="note">
-        <h3>What this stage adds (vs the previous stage)</h3>
+        <h3>What this example shows</h3>
         <p>Replaces SVG <code>&lt;text&gt;</code> with a richer construct that lets each label
             carry its own CSS — background colour, border-radius, padding, drop shadow, real font
-            stack. Only the 12 most-central characters get labels (the same set as the
-            previous stage).</p>
+            stack. Only the 12 most-central characters get labels — the curated set worth the
+            extra layout cost.</p>
         <ul>
             <li><strong>What is <code>foreignObject</code></strong>: a special SVG element that
                 lets you embed <em>foreign</em> markup (XHTML, MathML) inside SVG. The child
@@ -112,10 +112,10 @@
     </script>
 
     <nav class="example-nav">
-        <a href="04-zoom-aware-labels.html">&larr; Prev: zoom-aware labels</a>
+        <a href="01-zoom-aware-labels.html">&larr; Prev: §1 semantic zoom</a>
         <a href="../../index.html">L11 index</a>
         <span class="spacer"></span>
-        <a href="06-perf-and-scale.html">Next: stage 6 — perf and scale &rarr;</a>
+        <a href="03-perf-and-scale.html">Next: §3 perf and scale &rarr;</a>
     </nav>
 </body>
 

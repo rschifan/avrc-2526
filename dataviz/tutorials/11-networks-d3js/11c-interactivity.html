@@ -115,20 +115,30 @@ node.on("mouseleave", () =&gt; {
 
     <h2>3. Click to pin / unpin</h2>
     <p>Click a node and it stays where it is — even when the simulation reheats. Click it again and it
-        releases. Same <code>fx</code>/<code>fy</code> mechanism, no drag involved:</p>
+        releases. The toggle is a <code>pinned</code> flag on the datum that drives both
+        <code>fx</code>/<code>fy</code> and the ring style:</p>
     <pre><code>node.on("click", (event, d) =&gt; {
-    if (d.fx == null) {           // currently free → pin at current position
-        d.fx = d.x;
-        d.fy = d.y;
+    d.pinned = !d.pinned;
+    if (d.pinned) {               // pin at current position
+        d.fx = d.x;  d.fy = d.y;
         d3.select(event.currentTarget).attr("stroke", "#D55E00").attr("stroke-width", 3);
-    } else {                       // already pinned → release
-        d.fx = null;
-        d.fy = null;
+    } else {                       // release
+        d.fx = null; d.fy = null;
         d3.select(event.currentTarget).attr("stroke", "white").attr("stroke-width", 1);
     }
 });</code></pre>
+    <p><strong>Why a flag and not just <code>d.fx == null</code>?</strong> The same node also carries the
+        drag behaviour from §1, and a plain click is a zero-distance drag: <code>d3.drag</code> fires
+        <code>start</code> then <code>end</code> <em>before</em> the <code>click</code> event. If the
+        drag's <code>end</code> handler always cleared <code>fx</code>/<code>fy</code>, every click would
+        find <code>d.fx == null</code> and re-pin — the node would never release. So we keep an explicit
+        <code>pinned</code> flag and teach the drag to leave a pinned node alone:</p>
+    <pre><code>.on("end", (event, d) =&gt; {
+    if (!event.active) sim.alphaTarget(0);
+    if (!d.pinned) { d.fx = null; d.fy = null; }   // don't unpin a pinned node
+});</code></pre>
     <p>Combined with drag and hover, this is the full interaction vocabulary you'll see in nearly every
-        D3.js network demo. The capstone in <code>11e</code> uses all three:</p>
+        D3.js network demo. The capstone in <code>11g</code> uses all three:</p>
     <div class="container" id="demo-click"></div>
     <p class="example-link"><a href="examples/11c/03-click-pin.html" target="_blank" rel="noopener">↗ example</a></p>
 
@@ -272,7 +282,7 @@ c.root.on("click", event =&gt; {
                     .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
                     .on("end", (e, d) => {
                         if (!e.active) sim.alphaTarget(0);
-                        d.fx = null; d.fy = null;
+                        if (!d.pinned) { d.fx = null; d.fy = null; }   // leave pinned nodes fixed
                     });
             }
 
@@ -364,7 +374,8 @@ c.root.on("click", event =&gt; {
                 const L = buildLayout("#demo-click", 520);
                 L.node.call(makeDrag(L.sim, L.c.plot.node()));
                 L.node.on("click", (e, d) => {
-                    if (d.fx == null) {
+                    d.pinned = !d.pinned;
+                    if (d.pinned) {
                         d.fx = d.x; d.fy = d.y;
                         d3.select(e.currentTarget)
                             .attr("stroke", "#D55E00").attr("stroke-width", 3);
@@ -381,7 +392,9 @@ c.root.on("click", event =&gt; {
             // ============================================================
             {
                 const L = buildLayout("#demo-isolate", 520);
-                L.node.call(makeDrag(L.sim, L.c.plot.node()));
+                // .filter keeps drag idle-only, so dragging can't reheat the
+                // simulation while a node is isolated (sim is stopped then).
+                L.node.call(makeDrag(L.sim, L.c.plot.node()).filter(() => phase === "idle"));
                 const neighbors = buildNeighbors(L.nodes, L.links);
 
                 // Two label layers (only visible at specific moments):

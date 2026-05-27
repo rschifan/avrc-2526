@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>12g — same data, four views</title>
+    <link rel="stylesheet" href="../_shared/example.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="../_shared/utils.js"></script>
+    <style>
+        .legend { display: flex; flex-wrap: wrap; gap: 0.4em 1.2em; justify-content: center;
+                  margin: 0.8em 0 0.2em; font-size: 14.5px; }
+        .legend-item { display: inline-flex; align-items: center; gap: 0.4em; }
+        .legend .swatch { width: 13px; height: 13px; border-radius: 2px; display: inline-block; }
+        .hint { text-align: center; color: #777; font-size: 0.9em; margin: 0.2em 0 1.4em; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4em; margin-top: 1em; }
+        .card { border: 1px solid #e1e4e8; border-radius: 8px; padding: 0.9em 1em 1.1em; background: #fff; }
+        .card h3 { margin: 0 0 0.5em; font-size: 1.02em; }
+        .card h3 .tag { font-weight: 400; color: #8a8f96; font-size: 0.85em; }
+        .card svg { width: 100%; height: auto; display: block; }
+    </style>
+</head>
+
+<body>
+    <h1>12g — Same data, four views</h1>
+    <p class="lead">The 30 best-connected Game-of-Thrones characters drawn four ways at once — force,
+        matrix, chord, bundling — over the same nodes, edges, and community colours. Hover any node in
+        any panel and the same character lights up in all four.
+        <a href="../../12g-capstone-comparison.html">Source tutorial &rarr;</a></p>
+
+    <div class="note">
+        <h3>What this example shows</h3>
+        <ul>
+            <li><strong>One shared hover, four layouts.</strong> Each panel registers a sync handler;
+                hovering anywhere calls <code>broadcast(id)</code>, which highlights that character in
+                every view at once.</li>
+            <li><strong>Each view answers a different question</strong> — global shape (force), pair
+                lookup (matrix), weight distribution (chord), group-level flow (bundling).</li>
+            <li><strong>Same colour scale</strong> (community) across all panels, so a colour means the
+                same group everywhere.</li>
+        </ul>
+    </div>
+
+    <div class="legend" id="legend"></div>
+    <p class="hint">Same colour = same community. Hover any node, cell, arc, or leaf.</p>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Force-directed <span class="tag">· L11</span></h3>
+            <div id="view-force"></div>
+        </div>
+        <div class="card">
+            <h3>Adjacency matrix <span class="tag">· 12a</span></h3>
+            <div id="view-matrix"></div>
+        </div>
+        <div class="card">
+            <h3>Chord <span class="tag">· 12b</span></h3>
+            <div id="view-chord"></div>
+        </div>
+        <div class="card">
+            <h3>Edge bundling <span class="tag">· 12d</span></h3>
+            <div id="view-bundle"></div>
+        </div>
+    </div>
+
+    <script>
+        const DATA_URL = "../../datasets/got.json";
+
+        d3.json(DATA_URL).then(raw => {
+            const TOP_N = 30;
+            const top = [...raw.nodes].sort((a, b) => b.bc - a.bc).slice(0, TOP_N);
+            const ids = new Set(top.map(d => d.id));
+            const links = raw.links.filter(l => ids.has(l.source) && ids.has(l.target));
+            const colour = d3.scaleOrdinal(d3.schemeTableau10);
+
+            const communities = [...new Set(top.map(d => d.community))].sort(d3.ascending);
+            colour.domain(communities);
+            const lg = d3.select("#legend");
+            communities.forEach(c => {
+                const item = lg.append("span").attr("class", "legend-item");
+                item.append("span").attr("class", "swatch").style("background", colour(c));
+                item.append("span").text("Community " + c);
+            });
+
+            const neighbors = new Map(top.map(d => [d.id, new Set([d.id])]));
+            links.forEach(l => {
+                neighbors.get(l.source).add(l.target);
+                neighbors.get(l.target).add(l.source);
+            });
+
+            const syncHandlers = [];
+            function broadcast(id) { syncHandlers.forEach(fn => fn(id)); }
+            function attachHover(sel, getId) {
+                sel.style("cursor", "pointer")
+                   .on("mouseenter", (e, d) => broadcast(getId(d)))
+                   .on("mouseleave", () => broadcast(null));
+            }
+
+            // ---------- 1. force ----------
+            {
+                const c = makeCanvas("#view-force", 500,
+                    { width: 440, margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const nodes = top.map(d => ({ ...d }));
+                const lks = links.map(d => ({ ...d }));
+                nodes.forEach(d => d.__r = 6);
+                const wrap = c.plot.append("g");
+                const link = wrap.append("g")
+                    .attr("stroke", "#bbb").attr("stroke-opacity", 0.55)
+                    .selectAll("line").data(lks).join("line")
+                    .attr("vector-effect", "non-scaling-stroke");
+                const r = d3.scaleSqrt().domain(d3.extent(nodes, d => d.bc)).range([3, 12]);
+                const node = wrap.append("g").selectAll("circle").data(nodes).join("circle")
+                    .attr("r", d => r(d.bc))
+                    .attr("fill", d => colour(d.community))
+                    .attr("stroke", "white").attr("stroke-width", 1)
+                    .attr("vector-effect", "non-scaling-stroke");
+                const fSim = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(lks).id(d => d.id).distance(35))
+                    .force("charge", d3.forceManyBody().strength(-100))
+                    .force("collide", d3.forceCollide().radius(d => r(d.bc) + 1))
+                    .force("center", d3.forceCenter(c.innerW / 2, c.innerH / 2))
+                    .on("tick", () => {
+                        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                        node.attr("cx", d => d.x).attr("cy", d => d.y);
+                    });
+                fitToCanvas(wrap, fSim, nodes, c.innerW, c.innerH, { padding: 25 });
+
+                attachHover(node, d => d.id);
+                syncHandlers.push(focusId => {
+                    if (focusId == null) {
+                        node.attr("opacity", 1).attr("stroke", "white").attr("stroke-width", 1);
+                        link.attr("opacity", 0.55);
+                        return;
+                    }
+                    const focus = neighbors.get(focusId);
+                    node.attr("opacity", n => focus?.has(n.id) ? 1 : 0.15)
+                        .attr("stroke", n => n.id === focusId ? "#222" : "white")
+                        .attr("stroke-width", n => n.id === focusId ? 2 : 1);
+                    link.attr("opacity", l =>
+                        ((l.source.id ?? l.source) === focusId ||
+                         (l.target.id ?? l.target) === focusId) ? 0.95 : 0.05);
+                });
+            }
+
+            // ---------- 2. matrix ----------
+            {
+                const sorted = [...top].sort((a, b) =>
+                    d3.ascending(a.community, b.community) || d3.descending(a.bc, b.bc));
+                const idx = new Map(sorted.map((d, i) => [d.id, i]));
+                const N = sorted.length;
+                const M = Array.from({ length: N }, () => new Array(N).fill(0));
+                links.forEach(l => {
+                    const i = idx.get(l.source), j = idx.get(l.target);
+                    M[i][j] = l.weight; M[j][i] = l.weight;
+                });
+                const maxW = d3.max(links, l => l.weight);
+                const cellColour = d3.scaleSequential(d3.interpolateBlues).domain([0, maxW]);
+
+                const c = makeCanvas("#view-matrix", 380,
+                    { width: 440, margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const cell = Math.min(c.innerW, c.innerH) / N;
+                const offX = (c.innerW - cell * N) / 2;
+                const offY = (c.innerH - cell * N) / 2;
+
+                const rowGuides = c.plot.append("g")
+                    .selectAll("rect").data(sorted).join("rect")
+                    .attr("x", offX).attr("y", (d, i) => offY + cell * i)
+                    .attr("width", cell * N).attr("height", cell - 1)
+                    .attr("fill", d => colour(d.community))
+                    .attr("opacity", 0)
+                    .on("mouseenter", (e, d) => broadcast(d.id))
+                    .on("mouseleave", () => broadcast(null))
+                    .style("pointer-events", "all");
+
+                const cellRects = [];
+                for (let i = 0; i < N; i++) {
+                    for (let j = 0; j < N; j++) {
+                        if (M[i][j] === 0) continue;
+                        const rect = c.plot.append("rect")
+                            .attr("x", offX + cell * j)
+                            .attr("y", offY + cell * i)
+                            .attr("width", cell - 1).attr("height", cell - 1)
+                            .attr("fill",
+                                sorted[i].community === sorted[j].community
+                                    ? colour(sorted[i].community)
+                                    : cellColour(M[i][j]))
+                            .attr("opacity", 0.85)
+                            .style("cursor", "pointer")
+                            .datum({ i, j })
+                            .on("mouseenter", (e, d) => broadcast(sorted[d.i].id))
+                            .on("mouseleave", () => broadcast(null));
+                        cellRects.push({ rect, i, j });
+                    }
+                }
+                for (let i = 0; i < N; i++) {
+                    c.plot.append("rect")
+                        .attr("x", offX - 6).attr("y", offY + cell * i)
+                        .attr("width", 4).attr("height", cell - 1)
+                        .attr("fill", colour(sorted[i].community));
+                    c.plot.append("rect")
+                        .attr("x", offX + cell * i).attr("y", offY - 6)
+                        .attr("width", cell - 1).attr("height", 4)
+                        .attr("fill", colour(sorted[i].community));
+                }
+
+                syncHandlers.push(focusId => {
+                    if (focusId == null) {
+                        cellRects.forEach(({ rect }) => rect.attr("opacity", 0.85));
+                        rowGuides.attr("opacity", 0);
+                        return;
+                    }
+                    const focusRow = idx.get(focusId);
+                    cellRects.forEach(({ rect, i, j }) => {
+                        rect.attr("opacity", (i === focusRow || j === focusRow) ? 1 : 0.1);
+                    });
+                    rowGuides.attr("opacity", d => d.id === focusId ? 0.18 : 0);
+                });
+            }
+
+            // ---------- 3. chord ----------
+            {
+                const sorted = [...top].sort((a, b) =>
+                    d3.ascending(a.community, b.community) || d3.descending(a.bc, b.bc));
+                const idx = new Map(sorted.map((d, i) => [d.id, i]));
+                const N = sorted.length;
+                const M = Array.from({ length: N }, () => new Array(N).fill(0));
+                links.forEach(l => {
+                    const i = idx.get(l.source), j = idx.get(l.target);
+                    M[i][j] = l.weight; M[j][i] = l.weight;
+                });
+
+                const c = makeCanvas("#view-chord", 380,
+                    { width: 440, margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const cx = c.innerW / 2, cy = c.innerH / 2;
+                const outerR = Math.min(cx, cy) - 12;
+                const innerR = outerR - 8;
+                const g = c.plot.append("g").attr("transform", `translate(${cx}, ${cy})`);
+                const layout = d3.chord().padAngle(0.04).sortSubgroups(d3.descending)(M);
+                const arcs = g.append("g").selectAll("path").data(layout.groups).join("path")
+                    .attr("d", d3.arc().innerRadius(innerR).outerRadius(outerR))
+                    .attr("fill", d => colour(sorted[d.index].community))
+                    .style("cursor", "pointer")
+                    .on("mouseenter", (e, d) => broadcast(sorted[d.index].id))
+                    .on("mouseleave", () => broadcast(null));
+                const ribbons = g.append("g").attr("fill-opacity", 0.5)
+                    .selectAll("path").data(layout).join("path")
+                    .attr("d", d3.ribbon().radius(innerR))
+                    .attr("fill", d => colour(sorted[d.source.index].community));
+
+                syncHandlers.push(focusId => {
+                    if (focusId == null) {
+                        arcs.attr("opacity", 1);
+                        ribbons.attr("fill-opacity", 0.5);
+                        return;
+                    }
+                    const fi = idx.get(focusId);
+                    arcs.attr("opacity", d => d.index === fi ? 1 : 0.3);
+                    ribbons.attr("fill-opacity", r =>
+                        r.source.index === fi || r.target.index === fi ? 0.95 : 0.04);
+                });
+            }
+
+            // ---------- 4. edge bundling ----------
+            {
+                const comms = [...new Set(top.map(d => d.community))].sort(d3.ascending);
+                const tree = {
+                    name: "root",
+                    children: comms.map(comm => ({
+                        name: "c" + comm,
+                        children: top.filter(n => n.community === comm)
+                            .sort((a, b) => d3.descending(a.bc, b.bc))
+                            .map(n => ({ name: n.id, ...n }))
+                    }))
+                };
+                const c = makeCanvas("#view-bundle", 380,
+                    { width: 440, margin: { top: 10, right: 10, bottom: 10, left: 10 } });
+                const cx = c.innerW / 2, cy = c.innerH / 2;
+                const radius = Math.min(cx, cy);
+                const root = d3.hierarchy(tree);
+                d3.cluster().size([2 * Math.PI, radius - 18])(root);
+                const byId = new Map(root.leaves().map(l => [l.data.name, l]));
+                const bundleLinks = links.map(l => ({
+                    source: byId.get(l.source), target: byId.get(l.target)
+                })).filter(l => l.source && l.target);
+
+                const g = c.plot.append("g").attr("transform", `translate(${cx}, ${cy})`);
+                const line = d3.lineRadial()
+                    .curve(d3.curveBundle.beta(0.85))
+                    .radius(d => d.y).angle(d => d.x);
+                const linkPaths = g.append("g").attr("fill", "none").attr("stroke", "#888")
+                    .attr("stroke-opacity", 0.3)
+                    .selectAll("path").data(bundleLinks).join("path")
+                    .attr("d", l => line(l.source.path(l.target)));
+                const leafCircles = g.append("g").selectAll("circle").data(root.leaves()).join("circle")
+                    .attr("transform", d =>
+                        `rotate(${d.x * 180 / Math.PI - 90}) translate(${d.y}, 0)`)
+                    .attr("r", 4)
+                    .attr("fill", d => colour(d.data.community))
+                    .style("cursor", "pointer")
+                    .on("mouseenter", (e, d) => broadcast(d.data.name))
+                    .on("mouseleave", () => broadcast(null));
+
+                syncHandlers.push(focusId => {
+                    if (focusId == null) {
+                        linkPaths.attr("stroke", "#888").attr("stroke-opacity", 0.3);
+                        leafCircles.attr("opacity", 1).attr("r", 4);
+                        return;
+                    }
+                    linkPaths
+                        .attr("stroke", l => {
+                            const inc = l.source.data.name === focusId || l.target.data.name === focusId;
+                            if (!inc) return "#ccc";
+                            const other = l.source.data.name === focusId ? l.target : l.source;
+                            return colour(other.data.community);
+                        })
+                        .attr("stroke-opacity", l =>
+                            (l.source.data.name === focusId || l.target.data.name === focusId)
+                                ? 0.95 : 0.04);
+                    leafCircles.attr("opacity", d =>
+                            d.data.name === focusId ||
+                            bundleLinks.some(l =>
+                                (l.source === d && l.target.data.name === focusId) ||
+                                (l.target === d && l.source.data.name === focusId))
+                            ? 1 : 0.25)
+                        .attr("r", d => d.data.name === focusId ? 6 : 4);
+                });
+            }
+        });
+    </script>
+
+    <nav class="example-nav">
+        <a href="../12e/02-snapshots.html">&larr; Prev: 12e §4 snapshots</a>
+        <a href="../../index.html">L12 index</a>
+        <span class="spacer"></span>
+        <span></span>
+    </nav>
+</body>
+
+</html>

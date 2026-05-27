@@ -99,7 +99,7 @@ const node = svg.selectAll("circle").data(graph.nodes).join("circle")
 
     <div class="note"><strong>Takeaway.</strong> A network in the browser is two arrays + two joins:
         <code>links → &lt;line&gt;</code> and <code>nodes → &lt;circle&gt;</code>. Everything we add in
-        <code>11b</code>–<code>11e</code> — forces, drag, hover, zoom, encoding — sits on top of this
+        <code>11b</code>–<code>11g</code> — forces, drag, hover, zoom, encoding — sits on top of this
         skeleton.</div>
 
     <p class="tutorial-nav"><a href="index.html">L11 index</a> ·
@@ -168,9 +168,9 @@ const node = svg.selectAll("circle").data(graph.nodes).join("circle")
 
                 c.plot.append("g")
                     .selectAll("text").data(top).join("text")
-                    .attr("x", d => cx + (R + 14) * Math.cos(angle(top.indexOf(d))))
-                    .attr("y", d => cy + (R + 14) * Math.sin(angle(top.indexOf(d))))
-                    .attr("text-anchor", d => Math.cos(angle(top.indexOf(d))) > 0 ? "start" : "end")
+                    .attr("x", (d, i) => cx + (R + 14) * Math.cos(angle(i)))
+                    .attr("y", (d, i) => cy + (R + 14) * Math.sin(angle(i)))
+                    .attr("text-anchor", (d, i) => Math.cos(angle(i)) > 0 ? "start" : "end")
                     .attr("dy", 4)
                     .style("font-size", "var(--text-sm)")
                     .text(d => d.id.replace(/-/g, " "));

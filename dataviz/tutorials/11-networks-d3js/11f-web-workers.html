@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>11h — Web Worker simulation</title>
+    <title>11f — Web Worker simulation</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="./_shared/chart.js?v=3"></script>
     <link rel="stylesheet" href="./_shared/chart.css">
@@ -20,11 +20,14 @@
         .ctrl { display: flex; gap: 1.2em; align-items: center; flex-wrap: wrap;
                 margin: 0.6em 0; font-size: var(--text-md); }
         .ctrl input[type="range"] { width: 14em; }
+        .jank { display: flex; align-items: center; gap: 0.7em; margin: 0.6em 0;
+                font: 14px ui-monospace, monospace; color: #444; }
+        .jank b { color: #222; }
     </style>
 </head>
 
 <body>
-    <h1>11h — Web Worker simulation</h1>
+    <h1>11f — Web Worker simulation</h1>
     <p class="lead"><code>d3.forceSimulation</code> runs synchronously on the main thread.
         At scale it competes with rendering, event handlers, and any other JS the page is
         running, and the UI starts to jitter — drag lags, scroll stutters, transitions skip.
@@ -108,41 +111,36 @@ function draw() {
         rendering loop. Same SVG marks as every other demo in L11; the only difference is
         <em>where the positions come from</em>.</p>
 
-    <h2>5. Side-by-side: same simulation, on-thread vs in-worker</h2>
-    <p>Both panes render the same SVG (one <code>&lt;line&gt;</code> per edge,
-        one <code>&lt;circle&gt;</code> per node). The top pane runs the simulation on the main
-        thread; the bottom pane runs it in <code>_shared/force-worker.js</code>. Increase the
-        node count; the on-thread version starts to jitter while the in-worker version stays
-        smooth. (Drag is supported by the worker protocol — see <code>force-worker.js</code> —
-        but isn't wired into the renderer here: the focus is on showing the simulation thread
-        alone.)</p>
+    <h2>5. Seeing the difference: a responsiveness probe</h2>
+    <p>Here is the catch with demonstrating a worker: <code>d3.forceSimulation</code> is fast, so
+        if you just compare the two simulations' frame rates they look about the same. The benefit
+        of a worker isn't a faster simulation — it's a <strong>main thread that stays free</strong>.
+        To make that visible we need something on the main thread whose smoothness we can watch.</p>
+    <p>The <strong>spinner</strong> below is driven by <code>requestAnimationFrame</code>: it can
+        only turn smoothly if the main thread gets to paint each frame. The graph it lays out is a
+        synthetic stress network — not meant to be <em>read</em>, just to be <em>expensive</em>.
+        Run the layout <strong>on the main thread</strong> and every force tick blocks the next
+        frame — the spinner stutters and the <em>worst frame gap</em> spikes. Run the <em>same</em>
+        layout <strong>in the worker</strong> and the main thread only paints the positions it is
+        sent — the spinner keeps turning and the gap stays near one frame (~16&nbsp;ms). The meter
+        excludes the one-time setup cost, so it reflects the steady-state run; run one scenario at a
+        time, and raise the node count if the contrast is subtle on a fast machine.</p>
 
     <div class="ctrl">
         <label>node count
-            <input type="range" id="n-slider" min="200" max="2500" step="100" value="800">
-            <span id="n-val" style="font-variant-numeric: tabular-nums;">800</span>
+            <input type="range" id="n-slider" min="400" max="2500" step="100" value="1200">
+            <span id="n-val" style="font-variant-numeric: tabular-nums;">1200</span>
         </label>
-        <span style="color: #777;">presets:</span>
-        <button data-preset="300">300</button>
-        <button data-preset="800">800</button>
-        <button data-preset="1500">1.5k</button>
-        <button data-preset="2500">2.5k</button>
-        <button id="restart">Reheat both</button>
+        <button id="run-main">▶ Run on MAIN thread</button>
+        <button id="run-worker">▶ Run in WORKER</button>
     </div>
-
-    <div class="stacked">
-        <div>
-            <h3>Main-thread simulation</h3>
-            <div id="main-pane"></div>
-            <div class="stats" id="main-stats">—</div>
-        </div>
-        <div>
-            <h3>Worker-thread simulation</h3>
-            <div id="worker-pane"></div>
-            <div class="stats" id="worker-stats">—</div>
-        </div>
+    <div class="jank">
+        <span id="spinner"></span>
+        <span id="jank-readout">UI thread — click a button to run a layout</span>
     </div>
-    <p class="example-link"><a href="examples/11h/01-worker-simulation.html" target="_blank" rel="noopener">↗ example</a></p>
+    <div class="container" id="graph"></div>
+    <p class="stats" id="wk-stats">—</p>
+    <p class="example-link"><a href="examples/11f/01-worker-simulation.html" target="_blank" rel="noopener">↗ example</a></p>
 
     <h2>6. When to introduce a worker</h2>
     <ul>
@@ -156,7 +154,7 @@ function draw() {
         <li><strong>The hard parts</strong>: shipping <em>updates</em> to the simulation
             (new nodes, removed nodes, attribute changes) needs careful protocol design.
             The dynamic-graph version is covered in
-            <a href="../12-advanced-network-viz/12f-dynamic-graphs.html">12f</a> in the
+            <a href="../12-advanced-network-viz/12e-dynamic-graphs.html">12e</a> in the
             next class.</li>
     </ul>
 
@@ -176,102 +174,120 @@ function draw() {
             target="_blank">MDN — Transferable objects</a></li>
     </ul>
 
-    <p class="tutorial-nav"><a href="11f-progressive-build.html">← 11f — Progressive build</a> ·
-        <a href="index.html">L11 index</a></p>
+    <p class="tutorial-nav"><a href="11e-rendering-and-scale.html">← 11e — Rendering and scale</a> ·
+        <a href="index.html">L11 index</a> ·
+        <a href="11g-capstone.html">11g — Capstone →</a></p>
 
     <script>
-        const W = 800, H = 460;
-        let mainSim = null;
-        let worker = null;
+        const W = 760, H = 460;
+        let sim = null, worker = null;
 
+        // Sparse-ish random graph (~2 edges/node). Sparse keeps rendering cheap,
+        // so the force COMPUTE is what dominates the main thread.
         function genGraph(n) {
-            const nodes = d3.range(n).map(i => ({
-                id: i, color: d3.schemeTableau10[i % 10]
-            }));
+            const nodes = d3.range(n).map(i => ({ id: i, color: d3.schemeTableau10[i % 10] }));
             const links = [];
-            for (let i = 0; i < n; i++) {
-                for (let k = 0; k < 4; k++) {
+            for (let i = 0; i < n; i++)
+                for (let k = 0; k < 2; k++) {
                     const t = Math.floor(Math.random() * n);
                     if (t !== i) links.push({ source: i, target: t });
                 }
-            }
             return { nodes, links };
         }
 
-        function makeSvg(sel) {
-            const svg = d3.select(sel).append("svg")
-                .attr("viewBox", `0 0 ${W} ${H}`)
-                .attr("preserveAspectRatio", "xMidYMid meet")
-                .attr("width", W).attr("height", H);
-            const linkG = svg.append("g")
-                .attr("stroke", "#999").attr("stroke-opacity", 0.4);
-            const nodeG = svg.append("g")
-                .attr("stroke", "white").attr("stroke-width", 0.6);
-            return { svg, linkG, nodeG };
+        function makeSvg() {
+            d3.select("#graph").selectAll("*").remove();
+            const svg = d3.select("#graph").append("svg")
+                .attr("viewBox", `0 0 ${W} ${H}`).attr("preserveAspectRatio", "xMidYMid meet")
+                .attr("width", W).attr("height", H)
+                .style("background", "#fafafa").style("border", "1px solid #ddd").style("display", "block");
+            const linkG = svg.append("g").attr("stroke", "#ccc").attr("stroke-opacity", 0.45);
+            const nodeG = svg.append("g").attr("stroke", "white").attr("stroke-width", 0.6);
+            return { linkG, nodeG };
         }
 
-        // ============================================================
-        // main-thread version: simulation + SVG updates share the thread
-        // ============================================================
-        function runMain(n) {
-            d3.select("#main-pane").selectAll("*").remove();
-            const { nodes, links } = genGraph(n);
-            const { linkG, nodeG } = makeSvg("#main-pane");
+        // --- UI responsiveness probe -------------------------------------------
+        // A requestAnimationFrame-driven spinner. When the main thread is blocked
+        // the rAF callbacks are delayed: the hand stutters and the gap spikes.
+        const spin = d3.select("#spinner").append("svg")
+            .attr("width", 40).attr("height", 40).style("vertical-align", "middle");
+        spin.append("circle").attr("cx", 20).attr("cy", 20).attr("r", 16)
+            .attr("fill", "none").attr("stroke", "#ddd").attr("stroke-width", 3);
+        const hand = spin.append("line")
+            .attr("x1", 20).attr("y1", 20).attr("x2", 20).attr("y2", 6)
+            .attr("stroke", "#0072B2").attr("stroke-width", 3).attr("stroke-linecap", "round");
+        const readout = d3.select("#jank-readout");
+        let prev = performance.now(), angle = 0, worst = 0, janky = 0, runLabel = "", measuring = false;
+        function probe(now) {
+            const dt = now - prev; prev = now;
+            angle = (angle + dt * 0.5) % 360;
+            hand.attr("transform", `rotate(${angle} 20 20)`);
+            if (measuring) {
+                if (dt > 32) { janky++; worst = Math.max(worst, dt); }
+                readout.html(`<b>${runLabel}</b> — worst frame gap <b>${worst.toFixed(0)} ms</b> · janky frames <b>${janky}</b>`);
+            }
+            requestAnimationFrame(probe);
+        }
+        requestAnimationFrame(probe);
+        // arm AFTER the one-time setup (building 1000s of SVG nodes), so the meter
+        // reflects the steady-state run rather than the cost of creating the marks.
+        function armMeter(label) { worst = 0; janky = 0; prev = performance.now(); runLabel = label; measuring = true; }
 
+        function stopAll() {
+            if (sim) { sim.stop(); sim = null; }
+            if (worker) { worker.terminate(); worker = null; }
+        }
+
+        // ---------- main-thread run: simulation + rendering share the thread ----------
+        function runMain(n) {
+            stopAll();
+            const { nodes, links } = genGraph(n);
+            const { linkG, nodeG } = makeSvg();
             const link = linkG.selectAll("line").data(links).join("line");
             const node = nodeG.selectAll("circle").data(nodes).join("circle")
                 .attr("r", 3).attr("fill", d => d.color);
 
             let frames = 0, last = performance.now(), totalMs = 0;
-            if (mainSim) mainSim.stop();
-            mainSim = d3.forceSimulation(nodes)
+            armMeter("running on MAIN thread");
+            sim = d3.forceSimulation(nodes)
                 .force("link",   d3.forceLink(links).distance(20))
-                .force("charge", d3.forceManyBody().strength(-25))
-                .force("x", d3.forceX(W / 2).strength(0.1))
-                .force("y", d3.forceY(H / 2).strength(0.1))
+                .force("charge", d3.forceManyBody().strength(-30).theta(0.1))   // low theta = heavy compute
+                .force("x", d3.forceX(W / 2).strength(0.07))
+                .force("y", d3.forceY(H / 2).strength(0.07))
                 .alphaDecay(0.02)
                 .on("tick", () => {
                     const t0 = performance.now();
                     link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
                         .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
                     node.attr("cx", d => d.x).attr("cy", d => d.y);
-                    totalMs += performance.now() - t0;
-                    frames++;
+                    totalMs += performance.now() - t0; frames++;
                     const now = performance.now();
                     if (now - last >= 500) {
-                        const fps = (frames * 1000 / (now - last)).toFixed(0);
-                        const ms  = (totalMs / Math.max(1, frames)).toFixed(1);
-                        d3.select("#main-stats").text(
-                            `${n} nodes · ${fps} fps · ${ms} ms/tick · main thread`);
+                        d3.select("#wk-stats").text(
+                            `${n} nodes · ${(frames * 1000 / (now - last)).toFixed(0)} fps · ${(totalMs / Math.max(1, frames)).toFixed(1)} ms/render · main thread`);
                         frames = 0; last = now; totalMs = 0;
                     }
                 })
-                .on("end", () => d3.select("#main-stats").text(
-                    `${n} nodes · idle (frozen) · main thread`));
+                .on("end", () => {
+                    runLabel = "MAIN thread — idle (frozen)";
+                    d3.select("#wk-stats").text(`${n} nodes · idle (frozen) · main thread`);
+                });
         }
 
-        // ============================================================
-        // worker version: simulation in _shared/force-worker.js
-        // ============================================================
+        // ---------- worker run: simulation in _shared/force-worker.js ----------
         function runWorker(n) {
-            d3.select("#worker-pane").selectAll("*").remove();
+            stopAll();
             const { nodes, links } = genGraph(n);
-            const { linkG, nodeG } = makeSvg("#worker-pane");
-
-            // Create the marks once, bound to indices so we can read positions
-            // and endpoints out of typed arrays without object lookups.
-            const lines = linkG.selectAll("line").data(d3.range(links.length))
-                .join("line");
-            const circles = nodeG.selectAll("circle").data(d3.range(n))
-                .join("circle")
+            const { linkG, nodeG } = makeSvg();
+            // marks bound to indices → read positions/endpoints straight from typed arrays
+            const lines = linkG.selectAll("line").data(d3.range(links.length)).join("line");
+            const circles = nodeG.selectAll("circle").data(d3.range(n)).join("circle")
                 .attr("r", 3).attr("fill", i => nodes[i].color);
 
-            if (worker) worker.terminate();
             worker = new Worker("./_shared/force-worker.js");
-
-            let endpoints = null;
-            let positions = null;
+            let endpoints = null, positions = null, armed = false;
             let frames = 0, last = performance.now(), totalMs = 0;
+            runLabel = "WORKER — starting…"; measuring = false;
 
             function draw() {
                 if (!positions || !endpoints) return;
@@ -280,9 +296,7 @@ function draw() {
                     .attr("y1", (_, i) => positions[endpoints[i * 2]     * 2 + 1])
                     .attr("x2", (_, i) => positions[endpoints[i * 2 + 1] * 2])
                     .attr("y2", (_, i) => positions[endpoints[i * 2 + 1] * 2 + 1]);
-                circles
-                    .attr("cx", (_, i) => positions[i * 2])
-                    .attr("cy", (_, i) => positions[i * 2 + 1]);
+                circles.attr("cx", (_, i) => positions[i * 2]).attr("cy", (_, i) => positions[i * 2 + 1]);
             }
 
             worker.onmessage = (e) => {
@@ -291,41 +305,32 @@ function draw() {
                     endpoints = new Uint16Array(m.endpoints);
                 } else if (m.type === "tick") {
                     positions = new Float32Array(m.positions);
+                    if (!armed) { armed = true; armMeter("running in WORKER"); }   // exclude worker spin-up
                     const t0 = performance.now();
                     draw();
-                    totalMs += performance.now() - t0;
-                    frames++;
+                    totalMs += performance.now() - t0; frames++;
                     const now = performance.now();
                     if (now - last >= 500) {
-                        const fps = (frames * 1000 / (now - last)).toFixed(0);
-                        const ms  = (totalMs / Math.max(1, frames)).toFixed(1);
-                        d3.select("#worker-stats").text(
-                            `${n} nodes · ${fps} fps · ${ms} ms/render · in worker`);
+                        d3.select("#wk-stats").text(
+                            `${n} nodes · ${(frames * 1000 / (now - last)).toFixed(0)} fps · ${(totalMs / Math.max(1, frames)).toFixed(1)} ms/render · in worker`);
                         frames = 0; last = now; totalMs = 0;
                     }
                 } else if (m.type === "end") {
-                    d3.select("#worker-stats").text(
-                        `${n} nodes · idle (frozen) · in worker`);
+                    runLabel = "WORKER — idle (frozen)";
+                    d3.select("#wk-stats").text(`${n} nodes · idle (frozen) · in worker`);
                 }
             };
-
             worker.postMessage({ type: "init", nodes, links, w: W, h: H });
         }
 
-        function go() {
-            const n = +document.getElementById("n-slider").value;
-            document.getElementById("n-val").textContent = n;
-            runMain(n);
-            runWorker(n);
-        }
-        document.getElementById("n-slider").addEventListener("change", go);
-        document.getElementById("restart").addEventListener("click", go);
-        document.querySelectorAll("button[data-preset]").forEach(b =>
-            b.addEventListener("click", () => {
-                document.getElementById("n-slider").value = b.dataset.preset;
-                go();
-            }));
-        go();
+        const nVal = () => +document.getElementById("n-slider").value;
+        document.getElementById("n-slider").addEventListener("input", () => {
+            document.getElementById("n-val").textContent = nVal();
+        });
+        document.getElementById("run-main").addEventListener("click", () => runMain(nVal()));
+        document.getElementById("run-worker").addEventListener("click", () => runWorker(nVal()));
+
+        runWorker(nVal());   // open on the smooth (worker) run
     </script>
 </body>
 

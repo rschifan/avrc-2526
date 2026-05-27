@@ -61,9 +61,9 @@ function ticked() {
     <p>Any function with an <code>initialize(nodes)</code> method and a callable signature qualifies as a
         D3.js force — that's the full extension API. Here it just clips coordinates; you could equally
         implement gravity, an obstacle field, or a custom potential.</p>
-    <p>While the simulation warms up the canvas is dimmed by an overlay; once <code>alpha</code> falls
-        below <code>alphaMin</code> the simulation emits an <code>"end"</code> event and the overlay
-        fades out (handled by <code>attachWarmup(svg, sim)</code>):</p>
+    <p>While the simulation warms up the canvas is dimmed by an overlay; <code>attachWarmup(svg, sim)</code>
+        fades it out as soon as <code>alpha</code> drops below <code>~0.1</code> — the layout looks settled
+        by then, well before the simulation fully cools and fires <code>"end"</code>:</p>
     <p><button id="restart-basic">Restart simulation</button></p>
     <div class="container" id="demo-basic"></div>
     <p class="example-link"><a href="examples/11b/01-basic-simulation.html" target="_blank" rel="noopener">↗ example</a></p>
@@ -114,7 +114,7 @@ function ticked() {
         The §3 control panel and the L11 tutorials that follow combine both: <code>forceCenter</code>
         as a safety net plus <code>forceX</code>/<code>forceY</code> as the actual anchor. For the
         community-aware version where <em>each</em> node aims at its <em>community's</em> centroid,
-        see <a href="11f-progressive-build.html">11f stage 7</a> — same forces, per-datum target.</p>
+        see <a href="11d-encoding-and-zoom.html">11d §3</a> — same forces, per-datum target.</p>
 
     <h2>3. The interactive control panel</h2>
     <p>The demo below wires <strong>six</strong> simulation parameters to live sliders. Each input handler
